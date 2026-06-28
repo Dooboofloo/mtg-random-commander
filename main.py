@@ -1,4 +1,5 @@
 import requests
+import json
 from pathlib import Path
 
 ### Requests constants
@@ -14,50 +15,80 @@ ORACLE_TAGS_ID = r"bd8df61e-5d0a-47a2-9086-40137a645b98"
 
 ### Helper Methods
 
-def save_json(data: dict, file_path: str) -> None:
-    pass
+def save_dict(data: dict, file_path: str) -> None:
+    output_file = Path(file_path)
+    output_file.parent.mkdir(exist_ok=True, parents=True)
+    
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f)
+
+
+def save_file(data, file_path: str) -> None:
+    output_file = Path(file_path)
+    output_file.parent.mkdir(exist_ok=True, parents=True)
+    output_file.write_bytes(data)
+
 
 def get_request_as_json(request_url: str) -> dict:
-    try:
-        response = requests.get(request_url, headers=REQ_HEADER)
+    response = requests.get(request_url, headers=REQ_HEADER)
 
-        if response.status_code == OK:
-            return response.json()
-        else:
-            raise ValueError(f'API Request Failed! ({request_url})')
-    except Exception as e:
-        raise e
+    response.raise_for_status()
+
+    return response.json()
+
 
 def save_request_as_file(request_url: str, file_path: str) -> None:
-    try:
-        response = requests.get(request_url, headers=REQ_HEADER, stream=True)
+    response = requests.get(request_url, headers=REQ_HEADER)
 
-        if response.status_code == OK:
-            
-            output_file = Path(file_path)
-            output_file.parent.mkdir(exist_ok=True, parents=True)
-            output_file.write_bytes(response.content)
+    response.raise_for_status()
 
-            # with open(file_path, 'wb') as file:
-            #     file.write(response.content)
+    save_file(response.content, file_path)
 
-        else:
-            raise ValueError(f'API Request Failed! ({request_url})')
-    except Exception as e:
-        raise e
 
-def fetch_bulk_data(ids_to_save: list = [ORACLE_CARDS_ID, ORACLE_TAGS_ID]) -> None:
-    # TODO: Check timestamps of existing files, only update if necessary
+def fetch_bulk_data(ids_to_save: tuple[str, ...] = (ORACLE_CARDS_ID, ORACLE_TAGS_ID)) -> None:
 
+    # Retrieve bulk data manifest
     bulk_data = get_request_as_json(SCRYFALL_BULK_DATA_URL)
 
-    obj_to_save = [x for x in bulk_data['data'] if x['id'] in ids_to_save]
+    obj_to_save = [
+        obj for obj in bulk_data['data']
+        if obj['id'] in ids_to_save
+    ]
+
+    # Prepare local metadata for comparison against up-to-date manifest
+    saved_metadata = {}
+
+    data_meta_file = Path('./data/.meta')
+    if data_meta_file.exists():
+        saved_metadata = json.loads(data_meta_file.read_text())
+
+    updated_metadata = {}
 
     for obj in obj_to_save:
+        obj_id = obj['id']
         obj_name = obj['name']
         download_uri = obj['download_uri']
 
-        save_request_as_file(download_uri, f'./data/{obj_name}.json')
+        local_file = Path(f"./data/{obj_name}.json")
+
+        saved_timestamp = saved_metadata.get(obj_id)
+
+        should_download = (
+            not local_file.exists()
+            or saved_timestamp is None
+            or obj["updated_at"] > saved_timestamp # ISO format timestamps sort lexicographically
+        )
+
+        if should_download:
+            print(f"Downloading {obj_name}...")
+            save_request_as_file(download_uri, local_file)
+        else:
+            print(f"{obj_name} is already up to date.")
+        
+        updated_metadata[obj_id] = obj["updated_at"]
+
+    save_dict(updated_metadata, './data/.meta') # Save timestamp metadata locally
+
 
 ### Main
 
