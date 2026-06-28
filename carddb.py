@@ -9,10 +9,18 @@ class CardDatabase:
         self.oracle_path = Path(oracle_path)
         self.tag_path = Path(tag_path)
 
-        # Primary lookup
+        # Tag hierarchy
+        self.tag_parents: dict[str, set[str]] = defaultdict(set)
+        self.tag_children: dict[str, set[str]] = defaultdict(set)
+
+        # Tag lookups
+        self.tag_by_id: dict[str, str] = {}
+        self.id_by_tag: dict[str, str] = {}
+
+        # Primary card lookup
         self.cards_by_id: dict[str, dict] = {}
 
-        # Secondary lookups
+        # Secondary card lookups
         self.cards_by_name: dict[str, str] = {}
 
         self.cards_by_tag: dict[str, set[str]] = defaultdict(set)
@@ -68,7 +76,7 @@ class CardDatabase:
             ].add(oracle_id)
 
             # Keywords
-            for kw in card["keywords"]:
+            for kw in card.get("keywords", []):
                 self.cards_by_keywords[kw].add(oracle_id)
 
 
@@ -108,18 +116,57 @@ class CardDatabase:
         tag_data = json.loads(self.tag_path.read_text(encoding='utf-8'))
 
         for tag in tag_data:
-            
-            label = tag["label"]
+            tag_id = tag["id"]
+            label = tag["slug"]
 
+            # Register tag lookups
+            self.tag_by_id[tag_id] = label
+            self.id_by_tag[label] = tag_id
+
+            # Register tag hierarchy (by ids)
+            self.tag_parents[tag_id] |= set(tag["parent_ids"])
+            self.tag_children[tag_id] |= set(tag["child_ids"])
+
+            # Register card taggings
             for tagging in tag["taggings"]:
 
                 oracle_id = tagging["oracle_id"]
 
-                self.cards_by_tag[label].add(oracle_id)
-                self.tags_by_card[oracle_id].add(label)
+                self.cards_by_tag[tag_id].add(oracle_id)
+                self.tags_by_card[oracle_id].add(tag_id)
     
 
+    def _expand_tag(self, tag_id: str) -> set[str]:
+        
+        result = set()
+
+        stack = [tag_id]
+
+        while stack:
+            t = stack.pop()
+            if t in result:
+                continue
+            result.add(t)
+            stack.extend(self.tag_children.get(t, []))
+        
+        return result
+
     ### Database Queries
+
+    def get_cards_for_tag(self, tag_name: str) -> set[str]:
+
+        if not tag_name in self.id_by_tag:
+            return set()
+        
+        tag_id = self.id_by_tag[tag_name]
+
+        expanded = self._expand_tag(tag_id)
+
+        result = set()
+        for t in expanded:
+            result |= self.cards_by_tag[t]
+        
+        return result
 
     def cards_legal_for_commander(self, commander_colors: frozenset[str]) -> set[str]:
         
