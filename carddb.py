@@ -2,6 +2,21 @@ from collections import defaultdict
 from pathlib import Path
 import json
 
+SUPERTYPES = frozenset({
+    "Basic",
+    "Legendary",
+    "Ongoing",
+    "Snow",
+    "World",
+})
+
+EXCLUDED_CARDS = {
+    "bf29b215-d4f5-4641-97ef-b65d4c463e72", 
+    "4b9922b9-c5b5-467e-8a5b-1e45e862194d",
+    "af147bb6-aa46-4fc9-af96-de3740c19fd5",
+    "f71f01bc-caae-426b-a25a-bfbfeb9feb67",
+    "d410027b-1c22-461e-939d-06a2c851352e", # Banding lands
+}
 
 class CardDatabase:
     def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json"):
@@ -41,7 +56,7 @@ class CardDatabase:
 
     ### Construction Helpers
 
-    def _is_commander_legal(card: dict) -> bool:
+    def _can_be_commander(card: dict) -> bool:
 
         if card["oracle_id"] == r"0efb0d7e-dea0-4817-a243-15066e9ef333":
             # Special case for Grist, the Hunger Tide
@@ -88,6 +103,11 @@ class CardDatabase:
 
         for card in oracle_cards:
 
+            oracle_id = card["oracle_id"]
+
+            ### Guard Clauses
+
+            # Card must be legal in commander
             if card["legalities"]["commander"] != 'legal':
                 continue
 
@@ -96,7 +116,10 @@ class CardDatabase:
                 if any(card["name"] == part["name"] and part["component"] == "meld_result" for part in card["all_parts"]):
                     continue
 
-            oracle_id = card["oracle_id"]
+            # House rule/unfun cards
+            if oracle_id in EXCLUDED_CARDS:
+                continue
+
 
             self.cards_by_id[oracle_id] = card
             self.cards_by_name[card["name"]] = oracle_id
@@ -122,7 +145,6 @@ class CardDatabase:
             for kw in card.get("keywords", []):
                 self.cards_by_keywords[kw].add(oracle_id)
 
-
             # Split behavior based on card layout (Colors and Type Lines)
             if "card_faces" in card:
                 type_lines = [face["type_line"] for face in card["card_faces"]]
@@ -139,14 +161,7 @@ class CardDatabase:
                     subtypes = []
 
                 for word in left.split():
-                    if word in {
-                        "Basic",
-                        "Legendary",
-                        "Ongoing",
-                        "Snow",
-                        "World",
-                        "Token"
-                    }:
+                    if word in SUPERTYPES:
                         self.cards_by_supertype[word].add(oracle_id)
                     else:
                         self.cards_by_type[word].add(oracle_id)
@@ -155,7 +170,7 @@ class CardDatabase:
                     self.cards_by_subtype[subtype].add(oracle_id)
             
             # Register commanders
-            if CardDatabase._is_commander_legal(card):
+            if CardDatabase._can_be_commander(card):
                 self.commander_candidates.add(oracle_id)
         
     def _load_tags(self) -> None:

@@ -10,7 +10,6 @@ def main():
     db.load()
 
     import random
-
     chosen_commander = random.choice(list(db.commander_candidates))
     print(db.cards_by_id[chosen_commander]["name"])
 
