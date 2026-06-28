@@ -153,12 +153,15 @@ class CardDatabase:
 
     ### Database Queries
 
-    def get_cards_for_tag(self, tag_name: str) -> set[str]:
+    def get_cards_for_tag(self, tag_name: str, expand_children: bool = True) -> set[str]:
 
         if not tag_name in self.id_by_tag:
             return set()
         
         tag_id = self.id_by_tag[tag_name]
+
+        if not expand_children:
+            return self.cards_by_tag[tag_id]
 
         expanded = self._expand_tag(tag_id)
 
