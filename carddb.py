@@ -36,8 +36,46 @@ class CardDatabase:
         self.cards_by_color_identity: dict[frozenset[str], set[str]] = defaultdict(set)
         self.cards_by_mana_value: dict[int, set[str]] = defaultdict(set)
 
-        self.commanders = set() # TODO
+        self.commander_candidates = set()
 
+
+    ### Construction Helpers
+
+    def _is_commander_legal(card: dict) -> bool:
+
+        if card["oracle_id"] == r"0efb0d7e-dea0-4817-a243-15066e9ef333":
+            # Special case for Grist, the Hunger Tide
+            return True
+
+        oracle_text = card.get("oracle_text", "")
+
+        front_face_obj = card.get("card_faces", [card])[0]
+
+        front_face_tl = front_face_obj.get("type_line", "")
+        has_pt = "power" in front_face_obj and "toughness" in front_face_obj
+
+        if "Legendary" not in front_face_tl:
+            return False
+        if "Background" in front_face_tl:
+            return False
+        
+        # 1. Legendary Creature
+        if "Creature" in front_face_tl:
+            return True
+    
+        # 2. Legendary Vehicle
+        if "Vehicle" in front_face_tl:
+            return True
+        
+        # 3. Legendary Spacecraft with P/T
+        if "Spacecraft" in front_face_tl and has_pt:
+            return True
+        
+        # 4. Planeswalker with commander clause
+        if "Planeswalker" in front_face_tl and "can be your commander" in oracle_text.lower():
+            return True
+        
+        return False
 
     ### Database Construction
 
@@ -52,6 +90,11 @@ class CardDatabase:
 
             if card["legalities"]["commander"] != 'legal':
                 continue
+
+            # Skip meld backsides
+            if card["layout"] == "meld":
+                if any(card["name"] == part["name"] and part["component"] == "meld_result" for part in card["all_parts"]):
+                    continue
 
             oracle_id = card["oracle_id"]
 
@@ -110,6 +153,10 @@ class CardDatabase:
                 
                 for subtype in subtypes:
                     self.cards_by_subtype[subtype].add(oracle_id)
+            
+            # Register commanders
+            if CardDatabase._is_commander_legal(card):
+                self.commander_candidates.add(oracle_id)
         
     def _load_tags(self) -> None:
         
