@@ -19,10 +19,15 @@ EXCLUDED_CARDS = {
 }
 
 class CardDatabase:
-    def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json"):
+    def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json", include_banned = False):
         
+        # File paths
         self.oracle_path = Path(oracle_path)
         self.tag_path = Path(tag_path)
+
+        # Options
+        # ?TODO?: Add house ban toggle?
+        self.include_banned: bool = include_banned
 
         # Tag hierarchy
         self.tag_parents: dict[str, set[str]] = defaultdict(set)
@@ -56,6 +61,40 @@ class CardDatabase:
 
     ### Construction Helpers
 
+    def _include_card(self, card: dict) -> bool:
+
+        # If banned in commander but included regardless, allow inclusion (except for the below exceptions)
+        if card["legalities"]["commander"] == "banned" and self.include_banned:
+            if (
+                "Conspiracy" in card["type_line"]
+                or "playing for ante" in card.get("oracle_text", "").lower()
+                or card["name"] in ["Chaos Orb", "Falling Star", "Shahrazad"]
+            ):
+                return False
+            
+            return True
+
+        if card["legalities"]["commander"] != "legal":
+            return False
+
+        # House bans / unfun cards
+        if card["oracle_id"] in EXCLUDED_CARDS:
+            return False
+
+        # Back side of melded permanents
+        if (
+            card["layout"] == "meld"
+            and any(
+                part["component"] == "meld_result"
+                and part["name"] == card["name"]
+                for part in card["all_parts"]
+            )
+        ):
+            return False
+
+        return True
+
+    @staticmethod
     def _can_be_commander(card: dict) -> bool:
 
         if card["oracle_id"] == r"0efb0d7e-dea0-4817-a243-15066e9ef333":
@@ -103,23 +142,11 @@ class CardDatabase:
 
         for card in oracle_cards:
 
-            oracle_id = card["oracle_id"]
-
-            ### Guard Clauses
-
-            # Card must be legal in commander
-            if card["legalities"]["commander"] != 'legal':
-                continue
-
-            # Skip meld backsides
-            if card["layout"] == "meld":
-                if any(card["name"] == part["name"] and part["component"] == "meld_result" for part in card["all_parts"]):
+            # Guard Clauses
+            if not self._include_card(card):
                     continue
 
-            # House rule/unfun cards
-            if oracle_id in EXCLUDED_CARDS:
-                continue
-
+            oracle_id = card["oracle_id"]
 
             self.cards_by_id[oracle_id] = card
             self.cards_by_name[card["name"]] = oracle_id
