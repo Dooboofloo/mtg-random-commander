@@ -29,7 +29,8 @@ class CardDatabase:
         self.cache_path = Path(cache_path)
 
         # Construction Helpers
-        self.excluded_by_tag: set[str] = {}
+        self.excluded_by_tag: set[str] = set()
+        self.expanded_tags_cache: dict[tuple[str, bool], set[str]] = {}
 
         # Options
         self.include_banned: bool = options.get("include_banned", False)
@@ -380,7 +381,12 @@ class CardDatabase:
     def get_cards_for_tag(self, tag_name: str, expand_children: bool = True) -> set[str]:
 
         if not tag_name in self.id_by_tag:
-            return set()
+            raise ValueError(f"Unknown tag label: {tag_name}")
+        
+        cache_key = (tag_name, expand_children)
+
+        if cache_key in self.expanded_tags_cache:
+            return self.expanded_tags_cache[cache_key]
         
         tag_id = self.id_by_tag[tag_name]
 
@@ -393,6 +399,8 @@ class CardDatabase:
         for t in expanded:
             result |= self.cards_by_tag[t]
         
+        self.expanded_tags_cache[cache_key] = result
+
         return result
 
     def cards_legal_for_commander(self, commander_colors: frozenset[str]) -> set[str]:

@@ -54,7 +54,7 @@ class DeckBuilder:
 
         self.commander_id: str | None = None
         self.deck_ids: set[str] = set()
-        self.basic_lands: set[str] = set()
+        self.basic_lands: list[str] = []
         self.card_colors = {c: 0 for c in (*COLORS, "C")}
 
     
@@ -143,8 +143,8 @@ class DeckBuilder:
             # 0 colors = 0.6 (utility lands are far more important in colorless decks)
             nonbasic_percent_base = 0.6
         else:
-            # 1 color = 0.3; 5 colors = 0.8
-            nonbasic_percent_base = 0.3 + (len(self.commander_colors) - 1) / 8.0
+            # 1 color = 0.3; 5 colors = 0.7
+            nonbasic_percent_base = 0.2 + 0.1 * len(self.commander_colors)
         
         nonbasic_percent = nonbasic_percent_base + uniform(*self.settings.nonbasic_percent_delta)
 
@@ -210,10 +210,10 @@ class DeckBuilder:
         normal = count - snow
 
         if normal:
-            self.basic_lands.add(f"{normal} {name}")
+            self.basic_lands.append(f"{normal} {name}")
         
         if snow:
-            self.basic_lands.add(f"{snow} Snow-Covered {name}")
+            self.basic_lands.append(f"{snow} Snow-Covered {name}")
 
     def _land_is_useful(self, card_id: str) -> bool:
         # Filter out useless fetchlands (Scalding Tarn can fetch an Island or Mountain -> Useless in a Golgari (BG) deck)

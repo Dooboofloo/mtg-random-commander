@@ -38,7 +38,7 @@ def main():
 
     commander_name = safe_filename(builder.commander['name'])
 
-    out_path = Path(f'./out/{commander_name}.txt') # TODO: Ensure commander name is safe as file name and use that instead
+    out_path = Path(f'./out/{commander_name}.txt')
     out_path.parent.mkdir(exist_ok=True, parents=True)
 
     out_path.write_text('\n'.join(decklist), encoding='utf-8')
