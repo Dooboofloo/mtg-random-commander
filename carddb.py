@@ -10,16 +10,13 @@ SUPERTYPES = frozenset({
     "World",
 })
 
-EXCLUDED_CARDS = {
-    "bf29b215-d4f5-4641-97ef-b65d4c463e72", 
-    "4b9922b9-c5b5-467e-8a5b-1e45e862194d",
-    "af147bb6-aa46-4fc9-af96-de3740c19fd5",
-    "f71f01bc-caae-426b-a25a-bfbfeb9feb67",
-    "d410027b-1c22-461e-939d-06a2c851352e", # Banding lands
-}
-
 class CardDatabase:
-    def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json", cache_path: str | Path = r"./data/carddb.cache.json", include_banned = False):
+    def __init__(self,
+            oracle_path: str | Path = r"./data/Oracle Cards.json",
+            tag_path: str | Path = r"./data/Oracle Tags.json",
+            cache_path: str | Path = r"./data/carddb.cache.json",
+            **options
+        ):
         
         # File paths
         self.oracle_path = Path(oracle_path)
@@ -27,9 +24,8 @@ class CardDatabase:
         self.cache_path = Path(cache_path)
 
         # Options
-        # ?TODO?: Add house ban toggle?
-        # TODO: Wrap this stuff into a single "options" object
-        self.include_banned: bool = include_banned
+        self.include_banned: bool = options.get("include_banned", False)
+        self.excluded_cards: set[str] = options.get("excluded_cards", set())
 
         # Tag hierarchy
         self.tag_parents: dict[str, set[str]] = defaultdict(set)
@@ -80,7 +76,7 @@ class CardDatabase:
             return False
 
         # House bans / unfun cards
-        if card["oracle_id"] in EXCLUDED_CARDS:
+        if card["oracle_id"] in self.excluded_cards:
             return False
 
         # Back side of melded permanents
@@ -141,7 +137,7 @@ class CardDatabase:
             self.load_cache()
             return
 
-        print("Building CardDB Cache")
+        print("Building CardDB Cache...")
 
         self._load_oracle_cards()
         self._load_tags()
@@ -254,7 +250,7 @@ class CardDatabase:
     ### Database File Management
 
     def save_cache(self) -> None:
-        print("Saving CardDB Cache")
+        print("Saving CardDB Cache...")
 
         cache_path = Path(self.cache_path)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,7 +294,7 @@ class CardDatabase:
         cache_path.write_text(json.dumps(cache), encoding="utf-8")
     
     def load_cache(self) -> None:
-        print("Loading CardDB Cache")
+        print("Loading CardDB Cache...")
 
         cache_path = Path(self.cache_path)
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
