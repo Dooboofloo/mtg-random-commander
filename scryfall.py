@@ -41,7 +41,8 @@ def save_request_as_file(request_url: str, file_path: str) -> None:
     save_bytes(response.content, file_path)
 
 
-def fetch_bulk_data(ids_to_save: tuple[str, ...] = (ORACLE_CARDS_ID, ORACLE_TAGS_ID)) -> None:
+def fetch_bulk_data(ids_to_save: tuple[str, ...] = (ORACLE_CARDS_ID, ORACLE_TAGS_ID)) -> bool:
+    updated = False
 
     # Retrieve bulk data manifest
     bulk_data = get_request_as_json(SCRYFALL_BULK_DATA_URL)
@@ -78,9 +79,12 @@ def fetch_bulk_data(ids_to_save: tuple[str, ...] = (ORACLE_CARDS_ID, ORACLE_TAGS
         if should_download:
             print(f"Downloading {obj_name}...")
             save_request_as_file(download_uri, local_file)
+            updated = True
         else:
             print(f"{obj_name} is already up to date.")
         
         updated_metadata[obj_id] = obj["updated_at"]
 
     save_dict(updated_metadata, './data/.meta') # Save timestamp metadata locally
+
+    return updated # Return true if ANY files were updated -> ensure that carddb cache is recalculated

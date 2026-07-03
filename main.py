@@ -4,10 +4,10 @@ from carddb import CardDatabase
 ### Main
 
 def main():
-    fetch_bulk_data()
+    updated = fetch_bulk_data()
 
-    db = CardDatabase(include_banned=True)
-    db.load()
+    db = CardDatabase()
+    db.load(rebuild_cache=updated)
 
     import random
     chosen_commander = random.choice(list(db.commander_candidates))

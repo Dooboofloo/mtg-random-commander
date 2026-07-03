@@ -19,14 +19,16 @@ EXCLUDED_CARDS = {
 }
 
 class CardDatabase:
-    def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json", include_banned = False):
+    def __init__(self, oracle_path: str | Path = r"./data/Oracle Cards.json", tag_path: str | Path = r"./data/Oracle Tags.json", cache_path: str | Path = r"./data/carddb.cache.json", include_banned = False):
         
         # File paths
         self.oracle_path = Path(oracle_path)
         self.tag_path = Path(tag_path)
+        self.cache_path = Path(cache_path)
 
         # Options
         # ?TODO?: Add house ban toggle?
+        # TODO: Wrap this stuff into a single "options" object
         self.include_banned: bool = include_banned
 
         # Tag hierarchy
@@ -54,7 +56,7 @@ class CardDatabase:
 
         self.cards_by_colors: dict[frozenset[str], set[str]] = defaultdict(set)
         self.cards_by_color_identity: dict[frozenset[str], set[str]] = defaultdict(set)
-        self.cards_by_mana_value: dict[int, set[str]] = defaultdict(set)
+        self.cards_by_mana_value: dict[float, set[str]] = defaultdict(set)
 
         self.commander_candidates = set()
 
@@ -133,9 +135,17 @@ class CardDatabase:
 
     ### Database Construction
 
-    def load(self) -> None:
+    def load(self, rebuild_cache: bool = False) -> None:
+        
+        if not rebuild_cache and self.cache_path.exists():
+            self.load_cache()
+            return
+
+        print("Building CardDB Cache")
+
         self._load_oracle_cards()
         self._load_tags()
+        self.save_cache()
 
     def _load_oracle_cards(self) -> None:
         oracle_cards = json.loads(self.oracle_path.read_text(encoding='utf-8'))
@@ -239,6 +249,109 @@ class CardDatabase:
             stack.extend(self.tag_children.get(t, []))
         
         return result
+
+    
+    ### Database File Management
+
+    def save_cache(self) -> None:
+        print("Saving CardDB Cache")
+
+        cache_path = Path(self.cache_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        cache = {
+            "tag_parents": {k: list(v) for k, v in self.tag_parents.items()},
+            "tag_children": {k: list(v) for k, v in self.tag_children.items()},
+
+            "tag_by_id": self.tag_by_id,
+            "id_by_tag": self.id_by_tag,
+
+            "cards_by_id": self.cards_by_id,
+            "cards_by_name": self.cards_by_name,
+
+            "cards_by_tag": {k: list(v) for k, v in self.cards_by_tag.items()},
+            "tags_by_card": {k: list(v) for k, v in self.tags_by_card.items()},
+
+            "cards_by_type": {k: list(v) for k, v in self.cards_by_type.items()},
+            "cards_by_supertype": {k: list(v) for k, v in self.cards_by_supertype.items()},
+            "cards_by_subtype": {k: list(v) for k, v in self.cards_by_subtype.items()},
+            "cards_by_keywords": {k: list(v) for k, v in self.cards_by_keywords.items()},
+
+            "cards_by_colors": {
+                ",".join(sorted(k)): list(v)
+                for k, v in self.cards_by_colors.items()
+            },
+            "cards_by_color_identity": {
+                ",".join(sorted(k)): list(v)
+                for k, v in self.cards_by_color_identity.items()
+            },
+
+            "cards_by_mana_value": {
+                str(k): list(v)
+                for k, v in self.cards_by_mana_value.items()
+            },
+
+
+            "commander_candidates": list(self.commander_candidates),
+        }
+
+        cache_path.write_text(json.dumps(cache), encoding="utf-8")
+    
+    def load_cache(self) -> None:
+        print("Loading CardDB Cache")
+
+        cache_path = Path(self.cache_path)
+        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+
+        self.cards_by_id = cache["cards_by_id"]
+        self.cards_by_name = cache["cards_by_name"]
+
+        self.cards_by_tag = defaultdict(set, {
+            k: set(v) for k, v in cache["cards_by_tag"].items()
+        })
+        self.tags_by_card = defaultdict(set, {
+            k: set(v) for k, v in cache["tags_by_card"].items()
+        })
+
+        self.cards_by_type = defaultdict(set, {
+            k: set(v) for k, v in cache["cards_by_type"].items()
+        })
+        self.cards_by_supertype = defaultdict(set, {
+            k: set(v) for k, v in cache["cards_by_supertype"].items()
+        })
+        self.cards_by_subtype = defaultdict(set, {
+            k: set(v) for k, v in cache["cards_by_subtype"].items()
+        })
+        self.cards_by_keywords = defaultdict(set, {
+            k: set(v) for k, v in cache["cards_by_keywords"].items()
+        })
+
+        self.cards_by_colors = defaultdict(set, {
+            frozenset(k.split(",")) if k else frozenset(): set(v)
+            for k, v in cache["cards_by_colors"].items()
+        })
+
+        self.cards_by_color_identity = defaultdict(set, {
+            frozenset(k.split(",")) if k else frozenset(): set(v)
+            for k, v in cache["cards_by_color_identity"].items()
+        })
+
+        self.cards_by_mana_value = defaultdict(set, {
+            float(k): set(v)
+            for k, v in cache["cards_by_mana_value"].items()
+        })
+
+        self.commander_candidates = set(cache["commander_candidates"])
+
+        self.tag_parents = defaultdict(set, {
+            k: set(v) for k, v in cache["tag_parents"].items()
+        })
+        self.tag_children = defaultdict(set, {
+            k: set(v) for k, v in cache["tag_children"].items()
+        })
+
+        self.tag_by_id = cache["tag_by_id"]
+        self.id_by_tag = cache["id_by_tag"]
 
     ### Database Queries
 
