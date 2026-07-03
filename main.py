@@ -1,8 +1,10 @@
+from pathlib import Path
+import argparse
+import re
+
 from scryfall import fetch_bulk_data
 from carddb import CardDatabase
 from deckbuilder import DeckSettings, DeckBuilder
-from pathlib import Path
-import re
 
 ### Constants
 
@@ -20,116 +22,160 @@ EXCLUDED_CARDS = {
 def safe_filename(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "_", name)
 
-### Main
+def save_decklist(decklist: list[str], out_dir: str | Path, commander_name: str, index: int | None = None) -> Path:
+    
+    if index is None:
+        filename = f"{commander_name}.txt"
+    else:
+        filename = f"{index}_{commander_name}.txt"
 
-def main():
-    updated = fetch_bulk_data()
-
-    db = CardDatabase(excluded_cards=EXCLUDED_CARDS)
-    db.load(rebuild_cache=updated)
-
-    settings = DeckSettings()
-    builder = DeckBuilder(db, settings)
-    decklist = builder.build()
-
-    print(f"Saving decklist...")
-
-    commander_name = safe_filename(builder.commander['name'])
-
-    out_path = Path(f'./out/{commander_name}.txt')
+    out_path = Path(out_dir) / filename
     out_path.parent.mkdir(exist_ok=True, parents=True)
-
     out_path.write_text('\n'.join(decklist), encoding='utf-8')
 
-    print("Decklist saved!")
+    return out_path
 
-### Tests
+def parse_range(value: str, type_func=int):
+    
+    if '-' not in value:
+        return type_func(value)
+    
+    lo, hi = value.split('-')
+    return type_func(lo), type_func(hi)
 
-def validate_decks(n: int = 1000):
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Generate a random Commander decklist."
+    )
+
+    parser.add_argument(
+        "-c", "--commander",
+        default="random",
+        help='Commander name. Defaults to "random".',
+    )
+
+    parser.add_argument(
+        "-o", "--out-dir",
+        default="./out",
+        help="Output directory for generated decklists.",
+    )
+
+    parser.add_argument(
+        "--lands",
+        default="34-40",
+        help='Number of lands, either fixed or range. Example: "36" or "34-40".',
+    )
+
+    parser.add_argument(
+        "--snow-chance",
+        type=float,
+        default=0.055,
+        help="Chance that each basic land is snow-covered. Overridden to 1.0 if commander has snow synergy.",
+    )
+
+    parser.add_argument(
+        "--synergy-percent",
+        type=float,
+        default=0.25,
+        help="Percent of remaining nonland slots filled from commander synergy tags.",
+    )
+
+    parser.add_argument(
+        "--include-banned",
+        action="store_true",
+        help="Allow Commander-banned cards except for structurally problematic cards.",
+    )
+
+    parser.add_argument(
+        "--rebuild-cache",
+        action="store_true",
+        help="Force rebuild of the local CardDatabase cache.",
+    )
+
+    parser.add_argument(
+        "--count",
+        type=int,
+        default=1,
+        help="Number of decklists to generate.",
+    )
+
+    return parser
+
+def settings_from_args(args: argparse.Namespace) -> DeckSettings:
+    lands = parse_range(args.lands, int)
+
+    if isinstance(lands, int):
+        lands = (lands, lands)
+
+    return DeckSettings(
+        commander_name=args.commander,
+        land_count=lands,
+        chance_of_snow=args.snow_chance,
+        synergy_percent=args.synergy_percent,
+    )
+
+### Validation
+
+def validate_decklist(db: CardDatabase, builder: DeckBuilder) -> None:
+    # Test number of cards in maindeck
+
+    num_singleton = len(builder.deck_ids)
+    num_basics = sum(int(line.split(' ')[0]) for line in builder.basic_lands)
+    total = num_singleton + num_basics
+
+    # Test maindeck size
+    if total != 99:
+        raise ValueError(f"Invalid maindeck size: {total}")
+
+    # Test cards CI against commander's
+    for cid in builder.deck_ids:
+        card = builder.db.cards_by_id[cid]
+        identity = frozenset(card["color_identity"])
+
+        if not (identity <= builder.commander_colors):
+            raise ValueError(f"Invalid color identity: {identity} (should be {builder.commander_colors})")
+
+    # Test excluded type inclusions
+    for cid in builder.deck_ids:
+        card = builder.db.cards_by_id[cid]
+        type_line = card["type_line"]
+
+        for t in {"Attraction", "Sticker"}:
+            if t in type_line:
+                raise ValueError(f"Invalid type inclusion: {type_line}")
+
+    # Text excluded tag inclusions
+    for cid in builder.deck_ids:
+        for tag in db.excluded_tags:
+            if cid in db.get_cards_for_tag(tag):
+                raise ValueError(f"Card with excluded tag included: {db.cards_by_id[cid]['name']} (excluded tag: {tag})")
+
+### Main
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+
     updated = fetch_bulk_data()
 
-    db = CardDatabase(excluded_cards=EXCLUDED_CARDS)
-    db.load(rebuild_cache=updated)
+    db = CardDatabase(
+        excluded_cards = EXCLUDED_CARDS,
+        include_banned = args.include_banned,
+    )
+    db.load(rebuild_cache=updated or args.rebuild_cache)
 
-    settings = DeckSettings()
-    builder = DeckBuilder(db, settings)
-    decklist = builder.build()
+    settings = settings_from_args(args)
 
-    num_invalid = 0
-
-    for i in range(n):
-        print(f"===== Iteration {i} =====")
-
-        print()
-
-        settings = DeckSettings()
+    for i in range(args.count):
         builder = DeckBuilder(db, settings)
         decklist = builder.build()
 
-        print(f"Validating decklist...")
+        validate_decklist(db, builder)
 
-        valid = True
+        index = i + 1 if args.count > 1 else None
+        out_path = save_decklist(decklist, args.out_dir, builder.commander['name'], index=index)
 
-        # Test number of cards in maindeck
-
-        num_singleton = len(builder.deck_ids)
-        num_basics = sum(int(line.split(' ')[0]) for line in builder.basic_lands)
-        total = num_singleton + num_basics
-
-        print(total)
-        if total != 99:
-            valid = False
-
-        # Test cards CI against commander's
-
-        print(f"Commander CI: {builder.commander_colors}")
-        for cid in builder.deck_ids:
-            card = builder.db.cards_by_id[cid]
-            identity = frozenset(card["color_identity"])
-
-            if not (identity <= builder.commander_colors):
-                valid = False
-                print(card['name'], identity)
-                break
-
-        # Test excluded type inclusions
-
-        EXCLUDED_TYPE_WORDS = {"Attraction", "Sticker"}
-
-        for cid in builder.deck_ids:
-            card = builder.db.cards_by_id[cid]
-            type_line = card["type_line"]
-
-            if any(t in type_line for t in EXCLUDED_TYPE_WORDS):
-                valid = False
-                print("Excluded type:", card["name"], type_line)
-                break
-
-        # Text excluded tag inclusions
-
-        for cid in builder.deck_ids:
-            for tag in db.excluded_tags:
-                if cid in db.get_cards_for_tag(tag):
-                    valid = False
-                    print("Excluded tag:", card["name"], tag)
-                    break
-
-        if not valid:
-            num_invalid += 1
-            print(f"INVALID!!! Saving decklist...")
-
-            commander_name = safe_filename(builder.commander['name'])
-
-            out_path = Path(f'./out/{commander_name}.txt')
-            out_path.parent.mkdir(exist_ok=True, parents=True)
-
-            out_path.write_text('\n'.join(decklist), encoding='utf-8')
-
-            print("Decklist saved!")
-
-        print()
-    
-    print(num_invalid)
+        print(f"Saved decklist: {out_path}")
 
 if __name__ == '__main__':
-    validate_decks()
+    main()
