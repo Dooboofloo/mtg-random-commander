@@ -10,6 +10,11 @@ SUPERTYPES = frozenset({
     "World",
 })
 
+EXCLUDED_TYPES = frozenset({
+    "Sticker",
+    "Attraction",
+})
+
 class CardDatabase:
     def __init__(self,
             oracle_path: str | Path = r"./data/Oracle Cards.json",
@@ -23,9 +28,13 @@ class CardDatabase:
         self.tag_path = Path(tag_path)
         self.cache_path = Path(cache_path)
 
+        # Construction Helpers
+        self.excluded_by_tag: set[str] = {}
+
         # Options
         self.include_banned: bool = options.get("include_banned", False)
         self.excluded_cards: set[str] = options.get("excluded_cards", set())
+        self.excluded_tags: set[str] = options.get("excluded_tags", {"draft-matters"})
 
         # Tag hierarchy
         self.tag_parents: dict[str, set[str]] = defaultdict(set)
@@ -59,9 +68,23 @@ class CardDatabase:
 
     ### Construction Helpers
 
-    def _include_card(self, card: dict) -> bool:
+    def _should_index_card(self, card: dict) -> bool:
 
-        # If banned in commander but included regardless, allow inclusion (except for the below exceptions)
+        oracle_id = card["oracle_id"]
+
+        # House bans / unfun cards
+        if oracle_id in self.excluded_cards:
+            return False
+
+        # Exclude cards that have effects when drafted
+        if oracle_id in self.excluded_by_tag:
+            return False
+
+        # Exclude certain card types that are "legal" in commander but not included in the main deck
+        if any((card_type in card["type_line"]) for card_type in EXCLUDED_TYPES):
+            return False
+        
+        # If banned in commander but chosen to be included regardless, allow inclusion (except for the below exceptions)
         if card["legalities"]["commander"] == "banned" and self.include_banned:
             if (
                 "Conspiracy" in card["type_line"]
@@ -72,14 +95,7 @@ class CardDatabase:
             
             return True
 
-        if card["legalities"]["commander"] != "legal":
-            return False
-
-        # House bans / unfun cards
-        if card["oracle_id"] in self.excluded_cards:
-            return False
-
-        # Back side of melded permanents
+        # Exclude back side of melded permanents
         if (
             card["layout"] == "meld"
             and any(
@@ -90,7 +106,12 @@ class CardDatabase:
         ):
             return False
 
+        # Only allow cards legal in commander (unless the above option is chosen)
+        if card["legalities"]["commander"] != "legal":
+            return False
+
         return True
+
 
     @staticmethod
     def _can_be_commander(card: dict) -> bool:
@@ -139,8 +160,13 @@ class CardDatabase:
 
         print("Building CardDB Cache...")
 
-        self._load_oracle_cards()
         self._load_tags()
+
+        self.excluded_by_tag = set()
+        for tag in self.excluded_tags:
+            self.excluded_by_tag |= self.get_cards_for_tag(tag)
+
+        self._load_oracle_cards()
         self.save_cache()
 
     def _load_oracle_cards(self) -> None:
@@ -149,7 +175,7 @@ class CardDatabase:
         for card in oracle_cards:
 
             # Guard Clauses
-            if not self._include_card(card):
+            if not self._should_index_card(card):
                     continue
 
             oracle_id = card["oracle_id"]
