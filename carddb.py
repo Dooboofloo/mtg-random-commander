@@ -89,7 +89,7 @@ class CardDatabase:
         if card["legalities"]["commander"] == "banned" and self.include_banned:
             if (
                 "Conspiracy" in card["type_line"]
-                or "playing for ante" in card.get("oracle_text", "").lower()
+                or self.card_has_tag(oracle_id, "ante-matters")
                 or card["name"] in ["Chaos Orb", "Falling Star", "Shahrazad"]
             ):
                 return False
