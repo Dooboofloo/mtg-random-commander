@@ -111,6 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    parser.add_argument(
+        "--packages-include-lands",
+        action="store_true",
+        help="Allows user-defined packages to include lands"
+    )
+
     return parser
 
 def packages_from_args(args: argparse.Namespace) -> tuple[DeckPackage, ...] | None:
@@ -130,6 +136,7 @@ def packages_from_args(args: argparse.Namespace) -> tuple[DeckPackage, ...] | No
                 name=tag_slug,
                 tags=(tag_slug,),
                 count=count,
+                exclude_types=("Land",) if not args.packages_include_lands else ()
             )
         )
 
@@ -203,7 +210,19 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    updated = fetch_bulk_data()
+    try:
+        updated = fetch_bulk_data()
+    except:
+        print("Fetching bulk data failed.")
+
+        cards_exist = Path("./data/Oracle Cards.json").exists()
+        tags_exist = Path("./data/Oracle Tags.json").exists()
+
+        if not (cards_exist and tags_exist):
+            raise FileExistsError("No local data files exist.")
+
+        updated = False
+
 
     db = CardDatabase(
         excluded_cards = EXCLUDED_CARDS,
@@ -214,6 +233,8 @@ def main() -> None:
     settings = settings_from_args(args)
 
     for i in range(args.count):
+        print()
+
         builder = DeckBuilder(db, settings)
         decklist = builder.build()
 
