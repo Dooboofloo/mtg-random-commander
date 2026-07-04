@@ -4,7 +4,7 @@ import re
 
 from scryfall import fetch_bulk_data
 from carddb import CardDatabase
-from deckbuilder import DeckSettings, DeckBuilder
+from deckbuilder import DeckSettings, DeckBuilder, DeckPackage
 
 ### Constants
 
@@ -99,7 +99,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of decklists to generate.",
     )
 
+    parser.add_argument(
+        "--package",
+        nargs=2,
+        action="append",
+        metavar=("TAG_SLUG", "RANGE"),
+        default=None,
+        help=(
+            "Add a deck package by Scryfall Tagger slug and count/range. "
+            'Repeatable. Example: --package ramp 8-12 --package removal 8'
+        ),
+    )
+
     return parser
+
+def packages_from_args(args: argparse.Namespace) -> tuple[DeckPackage, ...] | None:
+    if not args.package:
+        return None
+
+    packages = []
+
+    for tag_slug, count_text in args.package:
+        count = parse_range(count_text, int)
+
+        if isinstance(count, int):
+            count = (count, count)
+
+        packages.append(
+            DeckPackage(
+                name=tag_slug,
+                tags=(tag_slug,),
+                count=count,
+            )
+        )
+
+    return tuple(packages)
 
 def settings_from_args(args: argparse.Namespace) -> DeckSettings:
     lands = parse_range(args.lands, int)
@@ -107,11 +141,22 @@ def settings_from_args(args: argparse.Namespace) -> DeckSettings:
     if isinstance(lands, int):
         lands = (lands, lands)
 
+    packages = packages_from_args(args)
+
+    if packages is None:
+        return DeckSettings(
+            commander_name=args.commander,
+            land_count=lands,
+            chance_of_snow=args.snow_chance,
+            synergy_percent=args.synergy_percent,
+        )
+
     return DeckSettings(
         commander_name=args.commander,
         land_count=lands,
         chance_of_snow=args.snow_chance,
         synergy_percent=args.synergy_percent,
+        packages=packages,
     )
 
 ### Validation

@@ -32,7 +32,7 @@ class DeckPackage:
 
 @dataclass
 class DeckSettings:
-    commander_name: str = "random"
+    commander_name: str = "random" # TODO: Fuzzy matching of card names
 
     land_count: tuple[int, int] = (34, 40)
     nonbasic_percent_delta: tuple[float, float] = (-0.1, 0.1)
@@ -106,7 +106,9 @@ class DeckBuilder:
 
     def _add_package(self, package: DeckPackage) -> None:
         count = package.roll_count()
-
+        
+        # TODO: Some synergy tags include lands, so it may be worth allowing those here and adjusting the land count elsewhere
+        # (ex. Animal Sanctuary (land) has synergy with Birds, Cats, Dogs, Goats, Oxen, and/or Snakes)
         pool = self._base_nonland_pool()
 
         tags = package.tags
@@ -125,7 +127,7 @@ class DeckBuilder:
         for card_type in package.exclude_types:
             pool -= self.db.cards_by_type[card_type]
 
-        self._add_random_cards(pool, count)
+        self._add_random_cards(pool, count, allow_shortfall=True)
 
     def _add_synergy_cards(self, count: int) -> None:
         # TODO: Determine what "synergy" is
@@ -242,6 +244,9 @@ class DeckBuilder:
         if len(available) < count:
             if not allow_shortfall:
                 raise ValueError(f"Not enough candidates: needed {count}, found: {len(available)}")
+            
+            # If there is a shortfall (and we allow there to be), we simply take the whole pool
+            count = len(available)
         
         for card_id in sample(available, count):
             self._add_card(card_id)
