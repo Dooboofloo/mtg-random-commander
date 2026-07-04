@@ -58,31 +58,84 @@ class DeckBuilder:
         self.basic_lands: list[str] = []
         self.card_colors = {c: 0 for c in (*COLORS, "C")}
 
+    ### Main Driver
     
     def build(self) -> list[str]:
         self._choose_commander()
 
-        print(f"Building Commander: {self.db.cards_by_id[self.commander_id]['name']}...")
+        print(f"Building Commander: {self.commander['name']}...")
 
-        land_count = randint(*self.settings.land_count)
-        nonland_count = 99 - land_count
+        target_land_count = randint(*self.settings.land_count)
+        target_nonland_count = 99 - target_land_count
 
         for package in self.settings.packages:
             print(f"Adding package: {package.name}...")
             self._add_package(package)
 
-        remaining_nonlands = nonland_count - len(self.deck_ids)
+        if self.land_count > target_land_count:
+            raise ValueError(
+                f"Packages added too many lands: "
+                f"{self.land_count} lands, target was {target_land_count}"
+            )
 
+        if self.nonland_count > target_nonland_count:
+            raise ValueError(
+                f"Packages added too many nonlands: "
+                f"{self.nonland_count} nonlands, target was {target_nonland_count}"
+            )
+        
+        remaining_nonlands = target_nonland_count - self.nonland_count
         synergy_count = int(remaining_nonlands * self.settings.synergy_percent)
-        misc_count = remaining_nonlands - synergy_count
 
         self._add_synergy_cards(synergy_count)
-        self._add_misc_cards(misc_count)
-        self._add_lands(land_count)
+        
+        remaining_nonlands = target_nonland_count - self.nonland_count
+        self._add_misc_cards(remaining_nonlands)
 
+        self._fill_lands(target_land_count)
+
+        if self.maindeck_count != 99:
+            raise ValueError(f"Deck has {self.maindeck_count} maindeck cards, expected 99")
+        
         return self.export_lines()
 
+    ### Properties
+
+    @property
+    def commander(self) -> dict:
+        return self.db.cards_by_id[self.commander_id]
     
+    @property
+    def commander_colors(self) -> frozenset[str]:
+        colors = frozenset(self.commander["color_identity"])
+        return colors if colors else frozenset({"C"})
+    
+    @property
+    def basic_land_count(self) -> int:
+        return sum(int(line.split(" ", 1)[0]) for line in self.basic_lands)
+
+    @property
+    def deck_land_ids(self) -> set[str]:
+        return self.deck_ids & self.db.cards_by_type["Land"]
+
+    @property
+    def deck_nonland_ids(self) -> set[str]:
+        return self.deck_ids - self.db.cards_by_type["Land"]
+
+    @property
+    def land_count(self) -> int:
+        return len(self.deck_land_ids) + self.basic_land_count
+
+    @property
+    def nonland_count(self) -> int:
+        return len(self.deck_nonland_ids)
+
+    @property
+    def maindeck_count(self) -> int:
+        return self.land_count + self.nonland_count
+
+    ### Build Methods
+
     def _choose_commander(self) -> None:
         if self.settings.commander_name == "random":
             self.commander_id = choice(tuple(self.db.commander_candidates))
@@ -121,28 +174,21 @@ class DeckBuilder:
         best_name = lowered_to_name[matches[0]]
         return self.db.cards_by_name[best_name]
 
-    @property
-    def commander(self) -> dict:
-        return self.db.cards_by_id[self.commander_id]
-    
-    @property
-    def commander_colors(self) -> frozenset[str]:
-        colors = frozenset(self.commander["color_identity"])
-        return colors if colors else frozenset({"C"})
-    
-    def _base_nonland_pool(self) -> set[str]:
+    def _base_pool(self) -> set[str]:
         pool = self.db.cards_legal_for_commander(self.commander_colors)
-        pool -= self.db.cards_by_type['Land']
         pool -= self.deck_ids
         pool.discard(self.commander_id)
         return pool
 
+    def _base_nonland_pool(self) -> set[str]:
+        pool = self._base_pool()
+        pool -= self.db.cards_by_type["Land"]
+        return pool
+
     def _add_package(self, package: DeckPackage) -> None:
         count = package.roll_count()
-        
-        # TODO: Some synergy tags include lands, so it may be worth allowing those here and adjusting the land count elsewhere
-        # (ex. Animal Sanctuary (land) has synergy with Birds, Cats, Dogs, Goats, Oxen, and/or Snakes)
-        pool = self._base_nonland_pool()
+
+        pool = self._base_pool()
 
         tags = package.tags
         if isinstance(tags, str):
@@ -171,7 +217,11 @@ class DeckBuilder:
         pool = self._base_nonland_pool()
         self._add_random_cards(pool, count)
     
-    def _add_lands(self, land_count: int) -> None:
+    def _fill_lands(self, target_land_count: int) -> None:
+        lands_needed = target_land_count - self.land_count
+
+        if lands_needed <= 0:
+            return
 
         # Amount of nonbasics is proportional to the deck's number of colors
         if self.commander_colors == frozenset({"C"}):
@@ -183,11 +233,17 @@ class DeckBuilder:
         
         nonbasic_percent = nonbasic_percent_base + uniform(*self.settings.nonbasic_percent_delta)
 
-        nonbasic_count = int(land_count * nonbasic_percent)
-        basic_count = land_count - nonbasic_count
+        desired_total_nonbasics = int(target_land_count * nonbasic_percent)
+        current_nonbasics = len(self.deck_land_ids)
 
-        self._add_nonbasic_lands(nonbasic_count)
-        self._add_basic_lands(basic_count)
+        nonbasics_needed = max(0, desired_total_nonbasics - current_nonbasics)
+        nonbasics_needed = min(nonbasics_needed, lands_needed)
+
+        self._add_nonbasic_lands(nonbasics_needed)
+
+        basics_needed = target_land_count - self.land_count
+
+        self._add_basic_lands(basics_needed)
 
     def _add_nonbasic_lands(self, count: int) -> None:
         pool = self.db.cards_legal_for_commander(self.commander_colors)
@@ -232,7 +288,7 @@ class DeckBuilder:
         if count <= 0:
             return
         
-        if self.db.id_by_tag.get("synergy-snow") in self.db.tags_by_card[self.commander_id]:
+        if self.db.card_has_tag(self.commander_id, "synergy-snow"):
             # If commander cares about snow permanents, make all basics snow
             snow = count
         else:
@@ -303,6 +359,8 @@ class DeckBuilder:
         for cost in costs:
             for color in COLORS:
                 self.card_colors[color] += cost.count(color)
+
+    ### Exporting
 
     def export_lines(self) -> list[str]:
         lines = []

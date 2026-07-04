@@ -403,6 +403,10 @@ class CardDatabase:
 
         return result
 
+    def card_has_tag(self, card_id: str, tag_name: str) -> bool:
+        tag_id = self.id_by_tag.get(tag_name)
+        return tag_id is not None and tag_id in self.tags_by_card[card_id]
+
     def cards_legal_for_commander(self, commander_colors: frozenset[str]) -> set[str]:
         
         legal = set()

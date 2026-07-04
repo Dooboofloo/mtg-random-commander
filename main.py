@@ -168,6 +168,8 @@ def validate_decklist(db: CardDatabase, builder: DeckBuilder) -> None:
     num_basics = sum(int(line.split(' ')[0]) for line in builder.basic_lands)
     total = num_singleton + num_basics
 
+    total = builder.maindeck_count
+
     # Test maindeck size
     if total != 99:
         raise ValueError(f"Invalid maindeck size: {total}")
