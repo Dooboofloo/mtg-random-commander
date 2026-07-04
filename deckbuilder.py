@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from random import choice, randint, random, sample, uniform
+from difflib import get_close_matches
 
 from carddb import CardDatabase
 
@@ -32,7 +33,7 @@ class DeckPackage:
 
 @dataclass
 class DeckSettings:
-    commander_name: str = "random" # TODO: Fuzzy matching of card names
+    commander_name: str = "random"
 
     land_count: tuple[int, int] = (34, 40)
     nonbasic_percent_delta: tuple[float, float] = (-0.1, 0.1)
@@ -86,8 +87,40 @@ class DeckBuilder:
         if self.settings.commander_name == "random":
             self.commander_id = choice(tuple(self.db.commander_candidates))
         else:
-            self.commander_id = self.db.cards_by_name[self.settings.commander_name]
+            self.commander_id = self._find_commander_by_name(
+                self.settings.commander_name
+            )
     
+    def _find_commander_by_name(self, name: str) -> str:
+        if name in self.db.cards_by_name:
+            cid = self.db.cards_by_name[name]
+            if cid in self.db.commander_candidates:
+                return cid
+
+        lowered_to_name = {
+            card_name.lower(): card_name
+            for card_name, cid in self.db.cards_by_name.items()
+            if cid in self.db.commander_candidates
+        }
+
+        query = name.lower()
+
+        if query in lowered_to_name:
+            return self.db.cards_by_name[lowered_to_name[query]]
+
+        matches = get_close_matches(
+            query,
+            lowered_to_name.keys(),
+            n=5,
+            cutoff=0.6,
+        )
+
+        if not matches:
+            raise ValueError(f'No commander found matching "{name}"')
+
+        best_name = lowered_to_name[matches[0]]
+        return self.db.cards_by_name[best_name]
+
     @property
     def commander(self) -> dict:
         return self.db.cards_by_id[self.commander_id]
@@ -199,7 +232,7 @@ class DeckBuilder:
         if count <= 0:
             return
         
-        if "synergy-snow" in self.db.tags_by_card[self.commander_id]:
+        if self.db.id_by_tag.get("synergy-snow") in self.db.tags_by_card[self.commander_id]:
             # If commander cares about snow permanents, make all basics snow
             snow = count
         else:
