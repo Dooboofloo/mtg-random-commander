@@ -5,6 +5,7 @@ from random import choice, randint, random, sample, uniform
 from difflib import get_close_matches
 
 from carddb import CardDatabase
+from synergy import get_synergy_packages
 
 COLORS = ("W", "U", "B", "R", "G")
 COLOR_TO_BASIC = {
@@ -209,9 +210,9 @@ class DeckBuilder:
         self._add_random_cards(pool, count, allow_shortfall=True)
 
     def _add_synergy_cards(self, count: int) -> None:
-        # TODO: Determine what "synergy" is
-        # For testing purposes we just do more misc cards
-        self._add_misc_cards(count)
+        pool = DeckBuilder.get_synergy_pool(self.db, self.commander_id)
+        pool &= self._base_pool()
+        self._add_random_cards(pool, count, allow_shortfall=True)
 
     def _add_misc_cards(self, count: int) -> None:
         pool = self._base_nonland_pool()
@@ -359,6 +360,17 @@ class DeckBuilder:
         for cost in costs:
             for color in COLORS:
                 self.card_colors[color] += cost.count(color)
+
+    ### Helpers
+
+    @staticmethod
+    def get_synergy_pool(db: CardDatabase, card_id: str) -> set[str]:
+        pool = set()
+
+        for package in get_synergy_packages(db, card_id):
+            pool |= package.pool
+        
+        return pool
 
     ### Exporting
 
