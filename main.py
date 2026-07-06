@@ -24,15 +24,19 @@ def safe_filename(name: str) -> str:
 
 def save_decklist(decklist: list[str], out_dir: str | Path, commander_name: str, index: int | None = None) -> Path:
     
-    # TODO: Ensure that old decklists aren't overwritten during subsequent runs
-
     if index is None:
-        filename = f"{commander_name}.txt"
+        filename = f"{commander_name}"
     else:
-        filename = f"{index}_{commander_name}.txt"
+        filename = f"{index}_{commander_name}"
 
-    out_path = Path(out_dir) / safe_filename(filename)
+    out_path = Path(out_dir) / f"{safe_filename(filename)}.txt"
     out_path.parent.mkdir(exist_ok=True, parents=True)
+
+    new_id = 0
+    while out_path.exists():
+        new_id += 1
+        out_path = Path(out_dir) / f"{safe_filename(filename)} ({new_id}).txt"
+
     out_path.write_text('\n'.join(decklist), encoding='utf-8')
 
     return out_path
@@ -245,7 +249,7 @@ def main() -> None:
         excluded_cards = EXCLUDED_CARDS,
         include_banned = args.include_banned,
     )
-    db.load(rebuild_cache=updated or args.rebuild_cache)
+    db.load(rebuild_cache=updated or args.rebuild_cache) # TODO: Cache invalidation can occur if updated=false, args.rebuild_cache=false, and the cache file exists, but the settings ("include_banned", etc.) have changed
 
     settings = settings_from_args(args)
 
