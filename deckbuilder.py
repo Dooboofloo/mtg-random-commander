@@ -41,12 +41,12 @@ class DeckSettings:
     chance_of_snow: float = 0.055
 
     packages: tuple[DeckPackage, ...] = field(default_factory=lambda: (
-        DeckPackage("Ramp", "ramp", (8, 12)),
-        DeckPackage("Removal", ("removal", "counterspell"), (8, 12)),
+        DeckPackage("Ramp", "ramp", (7, 12)),
+        DeckPackage("Removal", ("removal", "counterspell"), (7, 12)),
         DeckPackage("Card Draw", "draw", (5, 9))
     ))
 
-    synergy_percent: float = 0.25
+    synergy_percent: float = 0.4
 
 
 class DeckBuilder:
@@ -70,8 +70,13 @@ class DeckBuilder:
         target_nonland_count = 99 - target_land_count
 
         for package in self.settings.packages:
-            print(f"Adding package: {package.name}...")
-            self._add_package(package)
+            package_count = package.roll_count()
+
+            print(f"Adding package: {package.name} ({package_count})...")
+            package_added = self._add_package(package, package_count)
+
+            if package_added < package_count:
+                print(f"Not enough package cards ({package_added}/{package_count})")
 
         if self.land_count > target_land_count:
             raise ValueError(
@@ -88,15 +93,18 @@ class DeckBuilder:
         remaining_nonlands = target_nonland_count - self.nonland_count
         synergy_count = int(remaining_nonlands * self.settings.synergy_percent)
 
-        print("Adding synergy cards...")
-        self._add_synergy_cards(synergy_count)
+        print(f"Adding synergy cards ({synergy_count})...")
+        synergy_added = self._add_synergy_cards(synergy_count)
+
+        if synergy_added < synergy_count:
+            print(f"Not enough synergy cards ({synergy_added}/{synergy_count})")
         
         remaining_nonlands = target_nonland_count - self.nonland_count
 
-        print("Adding misc cards...")
+        print(f"Adding misc cards ({remaining_nonlands})...")
         self._add_misc_cards(remaining_nonlands)
 
-        print("Filling lands...")
+        print(f"Filling lands ({target_land_count})...")
         self._fill_lands(target_land_count)
 
         if self.maindeck_count != 99:
@@ -195,9 +203,7 @@ class DeckBuilder:
         pool -= self.db.cards_by_type["Land"]
         return pool
 
-    def _add_package(self, package: DeckPackage) -> None:
-        count = package.roll_count()
-
+    def _add_package(self, package: DeckPackage, count: int) -> int:
         pool = self._base_pool()
 
         tags = package.tags
@@ -216,16 +222,16 @@ class DeckBuilder:
         for card_type in package.exclude_types:
             pool -= self.db.cards_by_type[card_type]
 
-        self._add_random_cards(pool, count, allow_shortfall=True)
+        return self._add_random_cards(pool, count, allow_shortfall=True)
 
-    def _add_synergy_cards(self, count: int) -> None:
+    def _add_synergy_cards(self, count: int) -> int:
         pool = get_synergy_pool(self.db, self.commander_id)
         pool &= self._base_pool()
-        self._add_random_cards(pool, count, allow_shortfall=True)
+        return self._add_random_cards(pool, count, allow_shortfall=True)
 
-    def _add_misc_cards(self, count: int) -> None:
+    def _add_misc_cards(self, count: int) -> int:
         pool = self._base_nonland_pool()
-        self._add_random_cards(pool, count)
+        return self._add_random_cards(pool, count)
     
     def _fill_lands(self, target_land_count: int) -> None:
         lands_needed = target_land_count - self.land_count
@@ -255,7 +261,7 @@ class DeckBuilder:
 
         self._add_basic_lands(basics_needed)
 
-    def _add_nonbasic_lands(self, count: int) -> None:
+    def _add_nonbasic_lands(self, count: int) -> int:
         pool = self.db.cards_legal_for_commander(self.commander_colors)
         pool &= self.db.cards_by_type["Land"]
         pool -= self.db.cards_by_supertype["Basic"]
@@ -267,7 +273,7 @@ class DeckBuilder:
             if self._land_is_useful(cid)
         }
 
-        self._add_random_cards(pool, count, allow_shortfall=True)
+        return self._add_random_cards(pool, count, allow_shortfall=True)
 
     def _add_basic_lands(self, count: int) -> None:
         colors = tuple(c for c in self.commander_colors if c in COLORS)
@@ -337,7 +343,7 @@ class DeckBuilder:
             if color in COLOR_TO_BASIC
         )
 
-    def _add_random_cards(self, pool: set[str], count: int, allow_shortfall: bool = False) -> None:
+    def _add_random_cards(self, pool: set[str], count: int, allow_shortfall: bool = False) -> int:
         available = tuple(pool - self.deck_ids)
 
         if len(available) < count:
@@ -349,6 +355,8 @@ class DeckBuilder:
         
         for card_id in sample(available, count):
             self._add_card(card_id)
+        
+        return count # Return the amount of cards actually added to report shortfalls
 
     def _add_card(self, card_id: str) -> None:
         self.deck_ids.add(card_id)

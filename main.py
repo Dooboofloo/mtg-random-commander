@@ -158,7 +158,16 @@ def settings_from_args(args: argparse.Namespace) -> DeckSettings:
 
     packages = packages_from_args(args)
 
-    if packages is None or args.no_packages:
+    if args.no_packages:
+        return DeckSettings(
+            commander_name=args.commander,
+            land_count=lands,
+            chance_of_snow=args.snow_chance,
+            synergy_percent=args.synergy_percent,
+            packages=(),
+        )
+
+    if packages is None:
         return DeckSettings(
             commander_name=args.commander,
             land_count=lands,

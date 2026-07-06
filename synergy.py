@@ -68,7 +68,7 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
         return set()
 
     # For Human Werewolf, Eldrazi Scion, Mutant Ninja Turtle, etc.
-    return set.intersection(*pools)
+    return set.union(*pools)
 
 ### Individual Parsers
 
@@ -103,16 +103,14 @@ if __name__ == '__main__':
     db = CardDatabase()
     db.load(rebuild_cache=updated)
 
-    elf_subtype_pool = subtype_pool_from_slug(db, "elf")
-    typal_elf_pool = db.get_indexed_cards_for_tag("typal-elf")
+    goblin_subtype_pool = subtype_pool_from_slug(db, "goblin")
+    orc_subtype_pool = subtype_pool_from_slug(db, "orc")
+    typal_pool = db.get_indexed_cards_for_tag("typal-goblin-orc")
 
-    print("Elf subtype:", len(elf_subtype_pool))
-    print("typal-elf tag:", len(typal_elf_pool))
-    print("union:", len(elf_subtype_pool | typal_elf_pool))
-    print("overlap:", len(elf_subtype_pool & typal_elf_pool))
+    total_pool = goblin_subtype_pool | orc_subtype_pool | typal_pool
 
-    elves = parse_synergy_tag(db, "typal-elf").pool
+    orcs_and_goblins = parse_synergy_tag(db, "typal-goblin-orc").pool
 
-    print(elves == (elf_subtype_pool | typal_elf_pool))
+    # print(orcs_and_goblins == (total_pool))
 
-    # print(len(elves))
+    print(len(total_pool), len(orcs_and_goblins))
