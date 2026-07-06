@@ -1,22 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import singledispatchmethod
 import re
 
 from carddb import CardDatabase
-
-PARSERS = [
-    (re.compile(r"^typal-(.+)$"), parse_typal),
-    (re.compile(r"^synergy-(.+)$"), parse_synergy),
-    (re.compile(r"^(.+)-matters$"), parse_matters),
-    (re.compile(r"^tutor-(.+)$"), parse_tutor),
-    (re.compile(r"^affinity-for-(.+)$"), parse_affinity),
-    (re.compile(r"^(.+)fall$"), parse_fall),
-    (re.compile(r"^karnstructs$"), parse_karnstructs),
-    (re.compile(r"^token-increaser$"), parse_token_increaser),
-    (re.compile(r"draw-matters$"), parse_draw), 
-]
 
 @dataclass(frozen=True)
 class SynergyPackage:
@@ -24,6 +11,7 @@ class SynergyPackage:
     mode: str
     pool: set[str]
 
+### Public methods
 
 def get_synergy_packages(db: CardDatabase, card_id: str) -> list[SynergyPackage]:
     packages = []
@@ -34,8 +22,16 @@ def get_synergy_packages(db: CardDatabase, card_id: str) -> list[SynergyPackage]
 
         if package is not None:
             packages.append(package)
-    
+
     return packages
+
+def get_synergy_pool(db: CardDatabase, card_id: str) -> set[str]:
+    pool = set()
+
+    for package in get_synergy_packages(db, card_id):
+        pool |= package.pool
+
+    return pool
 
 def parse_synergy_tag(db: CardDatabase, tag: str) -> SynergyPackage | None:
     for pattern, parser in PARSERS:
@@ -45,4 +41,78 @@ def parse_synergy_tag(db: CardDatabase, tag: str) -> SynergyPackage | None:
 
     return None
 
-# TODO: Implement individual parsers
+### Helpers
+
+def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
+    """
+    Converts slug like
+
+    elf -> Elf
+    human-werewolf -> Human + Werewolf
+    """
+
+    if slug.startswith("non-"):
+        return set()
+    
+    parts = [part.capitalize() for part in slug.split("-")]
+
+    if not parts:
+        return set()
+
+    pools = [
+        set(db.cards_by_subtype.get(part, set()))
+        for part in parts
+    ]
+
+    if not pools or any(not pool for pool in pools):
+        return set()
+
+    # For Human Werewolf, Eldrazi Scion, Mutant Ninja Turtle, etc.
+    return set.intersection(*pools)
+
+### Individual Parsers
+
+def parse_typal(db: CardDatabase, source_tag: str, creature_type_slug: str) -> SynergyPackage:
+    pool = set()
+
+    # Include cards with the relevant subtype
+    pool |= subtype_pool_from_slug(db, creature_type_slug)
+
+    # Include cards that share the same typal tag
+    pool |= db.get_indexed_cards_for_tag(source_tag, expand_children=False)
+
+    return SynergyPackage(
+        source_tag=source_tag,
+        mode="typal",
+        pool=pool,
+    )
+
+### Parser Registry
+
+PARSERS = [
+    (re.compile(r"^typal-(.+)$"), parse_typal),
+]
+
+### CLI Testing
+
+if __name__ == '__main__':
+    from scryfall import fetch_bulk_data
+    
+    updated = fetch_bulk_data()
+
+    db = CardDatabase()
+    db.load(rebuild_cache=updated)
+
+    elf_subtype_pool = subtype_pool_from_slug(db, "elf")
+    typal_elf_pool = db.get_indexed_cards_for_tag("typal-elf")
+
+    print("Elf subtype:", len(elf_subtype_pool))
+    print("typal-elf tag:", len(typal_elf_pool))
+    print("union:", len(elf_subtype_pool | typal_elf_pool))
+    print("overlap:", len(elf_subtype_pool & typal_elf_pool))
+
+    elves = parse_synergy_tag(db, "typal-elf").pool
+
+    print(elves == (elf_subtype_pool | typal_elf_pool))
+
+    # print(len(elves))

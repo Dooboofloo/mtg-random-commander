@@ -402,6 +402,9 @@ class CardDatabase:
         self.expanded_tags_cache[cache_key] = result
 
         return result
+    
+    def get_indexed_cards_for_tag(self, tag_name: str, expand_children: bool = True) -> set[str]:
+        return self.get_cards_for_tag(tag_name, expand_children) & set(self.cards_by_id)
 
     def card_has_tag(self, card_id: str, tag_name: str) -> bool:
         tag_id = self.id_by_tag.get(tag_name)

@@ -24,12 +24,14 @@ def safe_filename(name: str) -> str:
 
 def save_decklist(decklist: list[str], out_dir: str | Path, commander_name: str, index: int | None = None) -> Path:
     
+    # TODO: Ensure that old decklists aren't overwritten during subsequent runs
+
     if index is None:
         filename = f"{commander_name}.txt"
     else:
         filename = f"{index}_{commander_name}.txt"
 
-    out_path = Path(out_dir) / filename
+    out_path = Path(out_dir) / safe_filename(filename)
     out_path.parent.mkdir(exist_ok=True, parents=True)
     out_path.write_text('\n'.join(decklist), encoding='utf-8')
 
@@ -114,7 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--packages-include-lands",
         action="store_true",
-        help="Allows user-defined packages to include lands"
+        help="Allows user-defined packages to include lands."
+    )
+
+    parser.add_argument(
+        "--no-packages",
+        action="store_true",
+        help="Causes there to be no predefined packages in deck creation."
     )
 
     return parser
@@ -150,7 +158,7 @@ def settings_from_args(args: argparse.Namespace) -> DeckSettings:
 
     packages = packages_from_args(args)
 
-    if packages is None:
+    if packages is None or args.no_packages:
         return DeckSettings(
             commander_name=args.commander,
             land_count=lands,

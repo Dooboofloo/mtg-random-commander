@@ -5,7 +5,7 @@ from random import choice, randint, random, sample, uniform
 from difflib import get_close_matches
 
 from carddb import CardDatabase
-from synergy import get_synergy_packages
+from synergy import get_synergy_pool
 
 COLORS = ("W", "U", "B", "R", "G")
 COLOR_TO_BASIC = {
@@ -88,11 +88,15 @@ class DeckBuilder:
         remaining_nonlands = target_nonland_count - self.nonland_count
         synergy_count = int(remaining_nonlands * self.settings.synergy_percent)
 
+        print("Adding synergy cards...")
         self._add_synergy_cards(synergy_count)
         
         remaining_nonlands = target_nonland_count - self.nonland_count
+
+        print("Adding misc cards...")
         self._add_misc_cards(remaining_nonlands)
 
+        print("Filling lands...")
         self._fill_lands(target_land_count)
 
         if self.maindeck_count != 99:
@@ -151,11 +155,16 @@ class DeckBuilder:
             if cid in self.db.commander_candidates:
                 return cid
 
-        lowered_to_name = {
-            card_name.lower(): card_name
-            for card_name, cid in self.db.cards_by_name.items()
-            if cid in self.db.commander_candidates
-        }
+        lowered_to_name = {}
+
+        for card_name, cid in self.db.cards_by_name.items():
+            if cid not in self.db.commander_candidates:
+                continue
+
+            lowered_to_name[card_name.lower()] = card_name
+
+            if " // " in card_name:
+                lowered_to_name[card_name.lower().split(" // ")[0]] = card_name # Also match just the front face of double-faced commanders
 
         query = name.lower()
 
@@ -210,7 +219,7 @@ class DeckBuilder:
         self._add_random_cards(pool, count, allow_shortfall=True)
 
     def _add_synergy_cards(self, count: int) -> None:
-        pool = DeckBuilder.get_synergy_pool(self.db, self.commander_id)
+        pool = get_synergy_pool(self.db, self.commander_id)
         pool &= self._base_pool()
         self._add_random_cards(pool, count, allow_shortfall=True)
 
@@ -360,17 +369,6 @@ class DeckBuilder:
         for cost in costs:
             for color in COLORS:
                 self.card_colors[color] += cost.count(color)
-
-    ### Helpers
-
-    @staticmethod
-    def get_synergy_pool(db: CardDatabase, card_id: str) -> set[str]:
-        pool = set()
-
-        for package in get_synergy_packages(db, card_id):
-            pool |= package.pool
-        
-        return pool
 
     ### Exporting
 
