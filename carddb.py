@@ -155,11 +155,11 @@ class CardDatabase:
 
     def load(self, rebuild_cache: bool = False) -> None:
         
-        if not rebuild_cache and self.cache_path.exists():
+        if not rebuild_cache and self._cache_is_valid():
             self.load_cache()
             return
 
-        print("Building CardDB Cache...")
+        print("Rebuilding CardDB Cache...")
 
         self._load_tags()
 
@@ -283,6 +283,8 @@ class CardDatabase:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         cache = {
+            "metadata": self._cache_metadata(),
+            
             "tag_parents": {k: list(v) for k, v in self.tag_parents.items()},
             "tag_children": {k: list(v) for k, v in self.tag_children.items()},
 
@@ -313,7 +315,6 @@ class CardDatabase:
                 str(k): list(v)
                 for k, v in self.cards_by_mana_value.items()
             },
-
 
             "commander_candidates": list(self.commander_candidates),
         }
@@ -375,6 +376,28 @@ class CardDatabase:
 
         self.tag_by_id = cache["tag_by_id"]
         self.id_by_tag = cache["id_by_tag"]
+
+    def _cache_metadata(self) -> dict:
+        return {
+            "oracle_path": str(self.oracle_path),
+            "tag_path": str(self.tag_path),
+            "options": {
+                "include_banned": self.include_banned,
+                "excluded_cards": sorted(self.excluded_cards),
+                "excluded_tags": sorted(self.excluded_tags),
+            },
+        }
+    
+    def _cache_is_valid(self) -> bool:
+        if not self.cache_path.exists():
+            return False
+
+        try:
+            cache = json.loads(self.cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+
+        return cache.get("metadata") == self._cache_metadata()
 
     ### Database Queries
 

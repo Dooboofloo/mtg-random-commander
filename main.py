@@ -253,8 +253,9 @@ def main() -> None:
 
     settings = settings_from_args(args)
 
+    print()
+
     for i in range(args.count):
-        print()
 
         builder = DeckBuilder(db, settings)
         decklist = builder.build()
@@ -265,6 +266,7 @@ def main() -> None:
         out_path = save_decklist(decklist, args.out_dir, builder.commander['name'], index=index)
 
         print(f"Saved decklist: {out_path}")
+        print()
 
 if __name__ == '__main__':
     main()
