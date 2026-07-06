@@ -15,6 +15,7 @@ EXCLUDED_CARDS = {
     "af147bb6-aa46-4fc9-af96-de3740c19fd5",
     "f71f01bc-caae-426b-a25a-bfbfeb9feb67",
     "d410027b-1c22-461e-939d-06a2c851352e", # Banding lands
+    "6d6a25fb-0432-4c7d-b0e6-e787ddc71218", # Cryptic Spire
 }
 
 ### Helpers

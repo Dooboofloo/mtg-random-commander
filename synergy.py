@@ -53,22 +53,13 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
 
     if slug.startswith("non-"):
         return set()
-    
-    parts = [part.capitalize() for part in slug.split("-")]
 
-    if not parts:
-        return set()
+    pool = set()
 
-    pools = [
-        set(db.cards_by_subtype.get(part, set()))
-        for part in parts
-    ]
+    for part in slug.split("-"):
+        pool |= db.cards_by_subtype.get(part.capitalize(), set())
 
-    if not pools or any(not pool for pool in pools):
-        return set()
-
-    # For Human Werewolf, Eldrazi Scion, Mutant Ninja Turtle, etc.
-    return set.union(*pools)
+    return pool
 
 ### Individual Parsers
 
