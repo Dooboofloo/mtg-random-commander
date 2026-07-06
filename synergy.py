@@ -48,7 +48,7 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
     Converts slug like
 
     elf -> Elf
-    human-werewolf -> Human + Werewolf
+    human-werewolf -> Human or Werewolf
     """
 
     if slug.startswith("non-"):
@@ -97,20 +97,29 @@ PARSERS = [
 
 if __name__ == '__main__':
     from scryfall import fetch_bulk_data
+    from pathlib import Path
     
     updated = fetch_bulk_data()
 
     db = CardDatabase()
     db.load(rebuild_cache=updated)
 
-    goblin_subtype_pool = subtype_pool_from_slug(db, "goblin")
-    orc_subtype_pool = subtype_pool_from_slug(db, "orc")
-    typal_pool = db.get_indexed_cards_for_tag("typal-goblin-orc")
+    tags = Path('./out/commander_tags.txt').read_text().split('\n')
 
-    total_pool = goblin_subtype_pool | orc_subtype_pool | typal_pool
+    unparsed_tags = set()
+    parsed_tags = set()
 
-    orcs_and_goblins = parse_synergy_tag(db, "typal-goblin-orc").pool
+    for tag in tags:
+        package = parse_synergy_tag(db, tag)
+        
+        if package is None:
+            unparsed_tags.add(tag)
+            continue
 
-    # print(orcs_and_goblins == (total_pool))
+        parsed_tags.add(f"{package.source_tag} {len(package.pool)}")
+    
+    unparsed_tags = sorted(unparsed_tags)
+    parsed_tags = sorted(parsed_tags)
 
-    print(len(total_pool), len(orcs_and_goblins))
+    Path('./out/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
+    Path('./out/parsed_tags.txt').write_text('\n'.join(parsed_tags))
