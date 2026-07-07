@@ -43,6 +43,23 @@ def parse_synergy_tag(db: CardDatabase, tag: str) -> SynergyPackage | None:
 
 ### Helpers
 
+IRREGULAR_PLURALS = {
+    "abilities": "ability",
+    "bodies": "body",
+}
+
+def singularize_slug(slug: str) -> str:
+    if slug in IRREGULAR_PLURALS:
+        return IRREGULAR_PLURALS[slug]
+
+    if slug.endswith("s"):
+        return slug[:-1]
+
+    return slug
+
+def slug_to_name(slug: str) -> str:
+    return " ".join(part.capitalize() for part in slug.split("-"))
+
 def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
     """
     Converts slug like
@@ -57,8 +74,40 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
     pool = set()
 
     for part in slug.split("-"):
-        pool |= db.cards_by_subtype.get(part.capitalize(), set())
+        pool |= concept_pool_from_slug(db, part)
 
+    return pool
+
+def concept_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
+    
+    if slug.startswith("non-"):
+        return set()
+    
+    candidates = [slug]
+
+    singular = singularize_slug(slug)
+    if singular != slug:
+        candidates.append(singular)
+    
+    pool = set()
+
+    for candidate in candidates:
+        name = slug_to_name(candidate)
+
+        # Type
+        pool |= db.cards_by_type.get(name, set())
+
+        # Supertype
+        pool |= db.cards_by_supertype.get(name, set())
+
+        # Subtype
+        pool |= db.cards_by_subtype.get(name, set())
+
+        # Keywords
+        pool |= db.cards_by_keywords.get(name, set())
+
+        # TODO: More concepts. Hardcode concepts like "outlaw"?
+    
     return pool
 
 ### Individual Parsers
@@ -86,16 +135,10 @@ PARSERS = [
 
 ### CLI Testing
 
-if __name__ == '__main__':
-    from scryfall import fetch_bulk_data
+def update_parsed_tags(db: CardDatabase):
     from pathlib import Path
-    
-    updated = fetch_bulk_data()
 
-    db = CardDatabase()
-    db.load(rebuild_cache=updated)
-
-    tags = Path('./out/commander_tags.txt').read_text().split('\n')
+    tags = Path('./synergy/commander_tags.txt').read_text().split('\n')
 
     unparsed_tags = set()
     parsed_tags = set()
@@ -114,3 +157,15 @@ if __name__ == '__main__':
 
     Path('./out/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
     Path('./out/parsed_tags.txt').write_text('\n'.join(parsed_tags))
+
+if __name__ == '__main__':
+    from scryfall import fetch_bulk_data
+    
+    updated = fetch_bulk_data()
+
+    db = CardDatabase()
+    db.load()
+
+    artifact_pool = concept_pool_from_slug(db, 'artifact')
+
+    print(len(artifact_pool))
