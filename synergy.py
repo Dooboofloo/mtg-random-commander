@@ -48,6 +48,14 @@ IRREGULAR_PLURALS = {
     "bodies": "body",
 }
 
+OTHER_CONCEPTS = {
+    "outlaw": ('subtype', 'assassin-mercenary-pirate-rogue-warlock'),
+    "party": ('subtype', 'cleric-rogue-warrior-wizard'),
+    "neo-solo-attack": ('subtype', 'samurai-warrior'),
+    "lupine": ('subtype', 'wolf-werewolf'),
+    "multi-sea-monster": ('subtype', 'kraken-leviathan-octopus-serpent'),
+}
+
 def singularize_slug(slug: str) -> str:
     if slug in IRREGULAR_PLURALS:
         return IRREGULAR_PLURALS[slug]
@@ -75,6 +83,10 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
 
     for part in slug.split("-"):
         pool |= concept_pool_from_slug(db, part)
+
+    # Special groupings
+    if slug in OTHER_CONCEPTS:
+        pool |= concept_pool_from_slug(db, slug)
 
     return pool
 
@@ -106,7 +118,13 @@ def concept_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
         # Keywords
         pool |= db.cards_by_keywords.get(name, set())
 
-        # TODO: More concepts. Hardcode concepts like "outlaw"?
+    # Other concepts
+    if slug in OTHER_CONCEPTS:
+        concept_type, concept_tag = OTHER_CONCEPTS[slug]
+
+        match concept_type:
+            case 'subtype':
+                pool |= subtype_pool_from_slug(db, concept_tag)
     
     return pool
 
@@ -127,10 +145,26 @@ def parse_typal(db: CardDatabase, source_tag: str, creature_type_slug: str) -> S
         pool=pool,
     )
 
+def parse_affinity(db: CardDatabase, source_tag: str, concept_slug: str) -> SynergyPackage:
+    pool = set()
+
+    # Include cards with relevant concept
+    pool |= concept_pool_from_slug(db, concept_slug)
+
+    # Include other cards that share the same affinity tag
+    pool |= db.get_indexed_cards_for_tag(source_tag, expand_children=False)
+
+    return SynergyPackage(
+        source_tag=source_tag,
+        mode="affinity",
+        pool=pool
+    )
+
 ### Parser Registry
 
 PARSERS = [
     (re.compile(r"^typal-(.+)$"), parse_typal),
+    (re.compile(r"^affinity-for-(.+)$"), parse_affinity),
 ]
 
 ### CLI Testing
@@ -155,8 +189,23 @@ def update_parsed_tags(db: CardDatabase):
     unparsed_tags = sorted(unparsed_tags)
     parsed_tags = sorted(parsed_tags)
 
-    Path('./out/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
-    Path('./out/parsed_tags.txt').write_text('\n'.join(parsed_tags))
+    print(f"Unparsed: {len(unparsed_tags)} / {len(tags)}")
+    print(f"Parsed: {len(parsed_tags)} / {len(tags)}")
+
+    Path('./synergy/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
+    Path('./synergy/parsed_tags.txt').write_text('\n'.join(parsed_tags))
+
+def check_against_scryfall(parser_pool: set[str], scryfall_path: str) -> set[str]:
+    from pathlib import Path
+    import json
+
+    path = Path(scryfall_path)
+    sf_set = set(card['oracle_id'] for card in json.loads(path.read_text('utf-8'))['data'])
+
+    if len(parser_pool) > len(sf_set):
+        return parser_pool - sf_set
+
+    return sf_set - parser_pool
 
 if __name__ == '__main__':
     from scryfall import fetch_bulk_data
@@ -166,6 +215,11 @@ if __name__ == '__main__':
     db = CardDatabase()
     db.load()
 
-    artifact_pool = concept_pool_from_slug(db, 'artifact')
+    # update_parsed_tags(db)
 
-    print(len(artifact_pool))
+    tag = "affinity-for-artifacts"
+
+    package = parse_synergy_tag(db, tag)
+    pool = package.pool
+
+    print(len(pool)) # Reminder: f:commander -t:attraction -otag:draft-matters
