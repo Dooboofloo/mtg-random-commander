@@ -253,7 +253,7 @@ def check_against_scryfall_search(
 ) -> tuple[set[str], set[str]]:
     from scryfall import search_cards
 
-    sf_cards = search_cards(search_query)
+    sf_cards = search_cards(search_query, debug_output=True)
     sf_set = {card["oracle_id"] for card in sf_cards}
 
     extra_local = parser_pool - sf_set
@@ -268,10 +268,11 @@ def test_tag_against_scryfall(db: CardDatabase, tag: str, sf_search: str) -> Non
     package = parse_synergy_tag(db, tag)
     pool = package.pool
 
-    query = f"f:commander -t:attraction -t:sticker -otag:draft-matters {sf_search}"
+    query = f"f:commander -t:attraction -t:sticker -otag:draft-matters ({sf_search})"
 
     extra_local, missing_local = check_against_scryfall_search(pool, query)
 
+    print()
     print("Local:", len(pool))
     print("Scryfall:", len(pool) - len(extra_local) + len(missing_local))
     print("Extra local:", len(extra_local))

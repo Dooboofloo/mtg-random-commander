@@ -44,7 +44,7 @@ def save_request_as_file(request_url: str, file_path: str) -> None:
     save_bytes(response.content, file_path)
 
 
-def search_cards(search_query: str) -> list[dict]:
+def search_cards(search_query: str, debug_output: bool = False) -> list[dict]:
     
     params = urlencode({
         "q": search_query,
@@ -54,18 +54,32 @@ def search_cards(search_query: str) -> list[dict]:
     url = f"{SCRYFALL_CARDS_SEARCH_URL}?{params}"
 
     cards = []
+    page = 0
+    total_pages = None
 
     while url:
+        page += 1
+
         data = get_request_as_json(url)
+
+        if total_pages is None:
+            total_cards = data.get("total_cards", 0)
+            page_size = 175 # Default Scryfall card page size
+            total_pages = (total_cards + page_size - 1) // page_size
+
+        if debug_output:
+            print(f"\rPage {page}/{total_pages}...", end="", flush=True)
+
         cards.extend(data["data"])
 
         if data.get("has_more"):
             url = data["next_page"]
-
-            # Wait to be polite to the API
-            sleep(0.51)
+            sleep(0.55)
         else:
             url = None
+
+    if debug_output:
+        print("\r\033[K", end="", flush=True)
 
     return cards
 
