@@ -60,6 +60,21 @@ OTHER_CONCEPTS = {
     "legend": ("supertype", "legendary")
 }
 
+
+"""
+Below is a list of concepts too broad to include in certain searches.
+
+Ex. "creaturefall" cares about creatures entering, but if we include creatures in the synergy pool,
+there are 17720 hits. Compared to the list of applicable cards with just the tag (570), generic creatures
+are over represented.
+"""
+BROAD_CONCEPTS = {
+    "creature",
+}
+
+def concept_is_too_broad(slug: str) -> bool:
+    return slug in BROAD_CONCEPTS or singularize_slug(slug) in BROAD_CONCEPTS
+
 def singularize_slug(slug: str) -> str:
     if slug in IRREGULAR_PLURALS:
         return IRREGULAR_PLURALS[slug]
@@ -167,16 +182,19 @@ def parse_typal(db: CardDatabase, source_tag: str, creature_type_slug: str) -> S
 def parse_direct(parser_type: str, excluded_types: tuple[str, ...] = ("Land",)) -> Callable[[CardDatabase, str, str], SynergyPackage]:
     def output(db: CardDatabase, source_tag: str, concept_slug: str):
 
-        # Include cards with relevant concept
-        concept_pool = concept_pool_from_slug(db, concept_slug)
+        pool = set()
+
+        # Include cards with relevant concept (unless concept is too broad)
+        if not concept_is_too_broad(concept_slug):
+            pool |= concept_pool_from_slug(db, concept_slug)
 
         # Include other cards that share the same tag
         tag_pool = db.get_indexed_cards_for_tag(source_tag, expand_children=True)
 
+        pool |= tag_pool
+
         for excluded_type in excluded_types:
-            concept_pool -= db.cards_by_type[excluded_type]
-        
-        pool = concept_pool | tag_pool
+            pool -= db.cards_by_type[excluded_type] - tag_pool
 
         return SynergyPackage(
             source_tag=source_tag,
@@ -301,7 +319,7 @@ if __name__ == '__main__':
     updated = fetch_bulk_data()
 
     db = CardDatabase()
-    db.load(rebuild_cache=updated)
+    db.load(rebuild_cache=True)
 
     print()
 

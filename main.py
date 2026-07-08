@@ -250,7 +250,7 @@ def main() -> None:
         excluded_cards = EXCLUDED_CARDS,
         include_banned = args.include_banned,
     )
-    db.load(rebuild_cache=updated or args.rebuild_cache) # TODO: Cache invalidation can occur if updated=false, args.rebuild_cache=false, and the cache file exists, but the settings ("include_banned", etc.) have changed
+    db.load(rebuild_cache=updated or args.rebuild_cache)
 
     settings = settings_from_args(args)
 
