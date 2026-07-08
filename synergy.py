@@ -261,12 +261,14 @@ def check_against_scryfall_search(
 
     return extra_local, missing_local
 
-def test_tag_against_scryfall(db: CardDatabase, tag: str) -> None:
+def test_tag_against_scryfall(db: CardDatabase, tag: str, sf_search: str) -> None:
+
+    print(f'Testing tag "{tag}" against scryfall search "{sf_search}"')
 
     package = parse_synergy_tag(db, tag)
     pool = package.pool
 
-    query = "f:commander -t:attraction -t:sticker -otag:draft-matters otag:landfall"
+    query = f"f:commander -t:attraction -t:sticker -otag:draft-matters {sf_search}"
 
     extra_local, missing_local = check_against_scryfall_search(pool, query)
 
@@ -275,28 +277,37 @@ def test_tag_against_scryfall(db: CardDatabase, tag: str) -> None:
     print("Extra local:", len(extra_local))
     print("Missing local:", len(missing_local))
 
-    print("\nMissing local:")
-    for cid in sorted(missing_local):
-        card = db.cards_by_id.get(cid)
-
-        if card is None:
-            print(f"  - {cid} (not indexed locally)")
-        else:
+    if len(extra_local) > 0:
+        print("\nExtra local:")
+        for cid in sorted(extra_local, key=lambda c: db.cards_by_id[c]["name"]):
+            card = db.cards_by_id[cid]
             print(f"  - {card['name']} — {card['type_line']}")
 
-    print("\nExtra local:")
-    for cid in sorted(extra_local, key=lambda c: db.cards_by_id[c]["name"]):
-        card = db.cards_by_id[cid]
-        print(f"  - {card['name']} — {card['type_line']}")
+    if len(missing_local) > 0:
+        print("\nMissing local:")
+        for cid in sorted(missing_local):
+            card = db.cards_by_id.get(cid)
+
+            if card is None:
+                print(f"  - {cid} (not indexed locally)")
+            else:
+                print(f"  - {card['name']} — {card['type_line']}")
 
 if __name__ == '__main__':
     from scryfall import fetch_bulk_data
+    from sys import argv
 
     updated = fetch_bulk_data()
 
     db = CardDatabase()
     db.load(rebuild_cache=updated)
 
-    update_parsed_tags(db)
+    print()
 
-    # test_tag_against_scryfall(db, "landfall")
+    num_args = len(argv) - 1
+    if num_args == 0:
+        update_parsed_tags(db)
+    elif num_args == 2:
+        test_tag_against_scryfall(db, argv[1], argv[2])
+    else:
+        print("Usage: no arguments to update parsed tags OR <tag-slug> <scryfall-search> for testing against scryfall")
