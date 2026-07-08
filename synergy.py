@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import re
 
@@ -49,11 +50,14 @@ IRREGULAR_PLURALS = {
 }
 
 OTHER_CONCEPTS = {
-    "outlaw": ('subtype', 'assassin-mercenary-pirate-rogue-warlock'),
-    "party": ('subtype', 'cleric-rogue-warrior-wizard'),
-    "neo-solo-attack": ('subtype', 'samurai-warrior'),
-    "lupine": ('subtype', 'wolf-werewolf'),
-    "multi-sea-monster": ('subtype', 'kraken-leviathan-octopus-serpent'),
+    "outlaw": ("subtype", "assassin-mercenary-pirate-rogue-warlock"),
+    "party": ("subtype", "cleric-rogue-warrior-wizard"),
+    "neo-solo-attack": ("subtype", "samurai-warrior"),
+    "lupine": ("subtype", "wolf-werewolf"),
+    "multi-sea-monster": ("subtype", "kraken-leviathan-octopus-serpent"),
+    "permanent": ("type", "artifact-battle-creature-enchantment-land-planeswalker"),
+    "historic": ("multiple", "artifact-legendary-saga"),
+    "legend": ("supertype", "legendary")
 }
 
 def singularize_slug(slug: str) -> str:
@@ -82,11 +86,14 @@ def subtype_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
     pool = set()
 
     for part in slug.split("-"):
-        pool |= concept_pool_from_slug(db, part)
+        pool |= db.cards_by_subtype.get(part.capitalize(), set())
 
     # Special groupings
     if slug in OTHER_CONCEPTS:
-        pool |= concept_pool_from_slug(db, slug)
+        concept_type, concept_tag = OTHER_CONCEPTS[slug]
+
+        if concept_type == "subtype":
+            pool |= subtype_pool_from_slug(db, concept_tag)
 
     return pool
 
@@ -125,6 +132,18 @@ def concept_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
         match concept_type:
             case 'subtype':
                 pool |= subtype_pool_from_slug(db, concept_tag)
+            
+            case "type":
+                for part in concept_tag.split("-"):
+                    pool |= db.cards_by_type.get(part.capitalize(), set())
+            
+            case "supertype":
+                for part in concept_tag.split("-"):
+                    pool |= db.cards_by_supertype.get(part.capitalize(), set())
+            
+            case "multiple":
+                for part in concept_tag.split("-"):
+                    pool |= concept_pool_from_slug(db, part)
     
     return pool
 
@@ -145,26 +164,59 @@ def parse_typal(db: CardDatabase, source_tag: str, creature_type_slug: str) -> S
         pool=pool,
     )
 
-def parse_affinity(db: CardDatabase, source_tag: str, concept_slug: str) -> SynergyPackage:
-    pool = set()
+def parse_direct(parser_type: str, excluded_types: tuple[str, ...] = ("Land",)) -> Callable[[CardDatabase, str, str], SynergyPackage]:
+    def output(db: CardDatabase, source_tag: str, concept_slug: str):
 
-    # Include cards with relevant concept
-    pool |= concept_pool_from_slug(db, concept_slug)
+        # Include cards with relevant concept
+        concept_pool = concept_pool_from_slug(db, concept_slug)
 
-    # Include other cards that share the same affinity tag
-    pool |= db.get_indexed_cards_for_tag(source_tag, expand_children=False)
+        # Include other cards that share the same tag
+        tag_pool = db.get_indexed_cards_for_tag(source_tag, expand_children=True)
 
-    return SynergyPackage(
-        source_tag=source_tag,
-        mode="affinity",
-        pool=pool
-    )
+        for excluded_type in excluded_types:
+            concept_pool -= db.cards_by_type[excluded_type]
+        
+        pool = concept_pool | tag_pool
+
+        return SynergyPackage(
+            source_tag=source_tag,
+            mode=parser_type,
+            pool=pool
+        )
+    
+    return output
 
 ### Parser Registry
 
+"""
+TODO:
+
+CORE:
+synergy-*
+*-matters
+
+MISC:
+x-cost-matters
+karnstructs / metalcraft / improvise
+tutors-by-name
+trigger-doubler
+untapper-*
+reanimate / reanimate-*
+regrowth / regrowth-*
+impulse-*
+copy-*
+
+MAYBE:
+animate-*
+sneak / sneak-*
+flicker-*
+cost-reducer-*
+"""
+
 PARSERS = [
     (re.compile(r"^typal-(.+)$"), parse_typal),
-    (re.compile(r"^affinity-for-(.+)$"), parse_affinity),
+    (re.compile(r"^affinity-for-(.+)$"), parse_direct("affinity")),
+    (re.compile(r"^(.+)fall$"), parse_direct("blankfall"))
 ]
 
 ### CLI Testing
@@ -195,31 +247,56 @@ def update_parsed_tags(db: CardDatabase):
     Path('./synergy/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
     Path('./synergy/parsed_tags.txt').write_text('\n'.join(parsed_tags))
 
-def check_against_scryfall(parser_pool: set[str], scryfall_path: str) -> set[str]:
-    from pathlib import Path
-    import json
+def check_against_scryfall_search(
+    parser_pool: set[str],
+    search_query: str,
+) -> tuple[set[str], set[str]]:
+    from scryfall import search_cards
 
-    path = Path(scryfall_path)
-    sf_set = set(card['oracle_id'] for card in json.loads(path.read_text('utf-8'))['data'])
+    sf_cards = search_cards(search_query)
+    sf_set = {card["oracle_id"] for card in sf_cards}
 
-    if len(parser_pool) > len(sf_set):
-        return parser_pool - sf_set
+    extra_local = parser_pool - sf_set
+    missing_local = sf_set - parser_pool
 
-    return sf_set - parser_pool
+    return extra_local, missing_local
 
-if __name__ == '__main__':
-    from scryfall import fetch_bulk_data
-    
-    updated = fetch_bulk_data()
-
-    db = CardDatabase()
-    db.load()
-
-    # update_parsed_tags(db)
-
-    tag = "affinity-for-artifacts"
+def test_tag_against_scryfall(db: CardDatabase, tag: str) -> None:
 
     package = parse_synergy_tag(db, tag)
     pool = package.pool
 
-    print(len(pool)) # Reminder: f:commander -t:attraction -otag:draft-matters
+    query = "f:commander -t:attraction -t:sticker -otag:draft-matters otag:landfall"
+
+    extra_local, missing_local = check_against_scryfall_search(pool, query)
+
+    print("Local:", len(pool))
+    print("Scryfall:", len(pool) - len(extra_local) + len(missing_local))
+    print("Extra local:", len(extra_local))
+    print("Missing local:", len(missing_local))
+
+    print("\nMissing local:")
+    for cid in sorted(missing_local):
+        card = db.cards_by_id.get(cid)
+
+        if card is None:
+            print(f"  - {cid} (not indexed locally)")
+        else:
+            print(f"  - {card['name']} — {card['type_line']}")
+
+    print("\nExtra local:")
+    for cid in sorted(extra_local, key=lambda c: db.cards_by_id[c]["name"]):
+        card = db.cards_by_id[cid]
+        print(f"  - {card['name']} — {card['type_line']}")
+
+if __name__ == '__main__':
+    from scryfall import fetch_bulk_data
+
+    updated = fetch_bulk_data()
+
+    db = CardDatabase()
+    db.load(rebuild_cache=updated)
+
+    update_parsed_tags(db)
+
+    # test_tag_against_scryfall(db, "landfall")

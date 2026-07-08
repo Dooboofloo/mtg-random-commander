@@ -1,6 +1,8 @@
 import requests
 import json
 from pathlib import Path
+from urllib.parse import urlencode
+from time import sleep
 
 ### Requests constants
 OK = 200
@@ -8,6 +10,7 @@ REQ_HEADER = {"User-Agent": "MTGRandomCommanderDeck/2.0", "Accept": "*/*"}
 
 # Request URLs
 SCRYFALL_BULK_DATA_URL = r"https://api.scryfall.com/bulk-data" # Contains information about the most up-to-date versions of Scryfall's bulk data stores
+SCRYFALL_CARDS_SEARCH_URL = r"https://api.scryfall.com/cards/search"
 
 # Scryfall bulk data ids (stable)
 ORACLE_CARDS_ID = r"27bf3214-1271-490b-bdfe-c0be6c23d02e"
@@ -39,6 +42,32 @@ def save_request_as_file(request_url: str, file_path: str) -> None:
     response = requests.get(request_url, headers=REQ_HEADER)
     response.raise_for_status()
     save_bytes(response.content, file_path)
+
+
+def search_cards(search_query: str) -> list[dict]:
+    
+    params = urlencode({
+        "q": search_query,
+        "unique": "cards",
+    })
+
+    url = f"{SCRYFALL_CARDS_SEARCH_URL}?{params}"
+
+    cards = []
+
+    while url:
+        data = get_request_as_json(url)
+        cards.extend(data["data"])
+
+        if data.get("has_more"):
+            url = data["next_page"]
+
+            # Wait to be polite to the API
+            sleep(0.51)
+        else:
+            url = None
+
+    return cards
 
 
 def fetch_bulk_data(ids_to_save: tuple[str, ...] = (ORACLE_CARDS_ID, ORACLE_TAGS_ID)) -> bool:
