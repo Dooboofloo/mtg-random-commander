@@ -234,35 +234,69 @@ cost-reducer-*
 PARSERS = [
     (re.compile(r"^typal-(.+)$"), parse_typal),
     (re.compile(r"^affinity-for-(.+)$"), parse_direct("affinity")),
-    (re.compile(r"^(.+)fall$"), parse_direct("blankfall"))
+    (re.compile(r"^(.+)fall$"), parse_direct("blankfall")),
+    (re.compile(r"^synergy-(.+)$"), parse_direct("synergy")),
 ]
 
 ### CLI Testing
 
+def direct_pool_for_package(db: CardDatabase, package: SynergyPackage) -> set[str]:
+    expand_children = package.mode != "typal"
+
+    return db.get_indexed_cards_for_tag(
+        package.source_tag,
+        expand_children=expand_children,
+    )
+
+
 def update_parsed_tags(db: CardDatabase):
+    """
+    Testing method for determining efficacy of parsers.
+    Operates on the list of tags that are included on any commander candidate.
+
+    Unparsed -> Currently no support (SynergyPackage is None)
+    Partially Parsed -> Synergy matching currently only finds same-tag cards
+    Parsed -> Synergy matches same-tag cards as well as inferred concepts
+    """
+
     from pathlib import Path
 
-    tags = Path('./synergy/commander_tags.txt').read_text().split('\n')
+    tags = Path('./synergy/commander_tags.txt').read_text().splitlines()
 
     unparsed_tags = set()
+    partially_parsed_tags = set()
     parsed_tags = set()
 
     for tag in tags:
         package = parse_synergy_tag(db, tag)
-        
+
         if package is None:
             unparsed_tags.add(tag)
             continue
 
-        parsed_tags.add(f"{package.source_tag} {len(package.pool)}")
-    
+        direct_pool = direct_pool_for_package(db, package)
+        inferred_pool = package.pool - direct_pool
+
+        line = f"{package.source_tag} {len(package.pool)}"
+
+        if not inferred_pool:
+            partially_parsed_tags.add(line)
+            continue
+
+        parsed_tags.add(
+            f"{line} [direct={len(direct_pool)}, inferred={len(inferred_pool)}]"
+        )
+
     unparsed_tags = sorted(unparsed_tags)
+    partially_parsed_tags = sorted(partially_parsed_tags)
     parsed_tags = sorted(parsed_tags)
 
     print(f"Unparsed: {len(unparsed_tags)} / {len(tags)}")
+    print(f"Partially: {len(partially_parsed_tags)} / {len(tags)}")
     print(f"Parsed: {len(parsed_tags)} / {len(tags)}")
 
     Path('./synergy/unparsed_tags.txt').write_text('\n'.join(unparsed_tags))
+    Path('./synergy/partially_parsed_tags.txt').write_text('\n'.join(partially_parsed_tags))
     Path('./synergy/parsed_tags.txt').write_text('\n'.join(parsed_tags))
 
 def check_against_scryfall_search(
