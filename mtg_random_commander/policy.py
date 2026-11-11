@@ -65,8 +65,8 @@ class CardPolicy:
             pool |= db.by_legality("commander", "banned")
 
         excluded = (
-            db.by_type("Attraction")
-            | db.by_type("Sticker")
+            db.by_subtype("Attraction")
+            | db.by_type("Stickers")
             | db.by_type("Conspiracy")
             | DEFAULT_HOUSE_BANS
             | self.excluded_cards

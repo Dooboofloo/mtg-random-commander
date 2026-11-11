@@ -178,15 +178,11 @@ def test_policy_filters_by_legality_house_exclusions_and_identity():
             (face(types=("Creature",)),),
             frozenset("G"),
         ),
-        "attraction": FakeCard(
-            "attraction",
-            (face(types=("Artifact", "Attraction")),),
-        ),
     }
 
     db = FakeDB(
         cards,
-        legal={"cmd", "green", "blue", "draft", "attraction"},
+        legal={"cmd", "green", "blue", "draft"},
         banned={"banned"},
         tags={
             "draft-matters": frozenset({"draft"}),
@@ -231,3 +227,37 @@ def test_excluded_tags_override_include_banned():
     policy = CardPolicy(include_banned=True)
 
     assert policy.eligible_cards(db) == {"ordinary"}
+
+
+def test_stickers_and_attractions_are_excluded():
+    cards = {
+        "sticker": FakeCard(
+            "sticker",
+            (face(types=("Stickers",)),),
+        ),
+        "attraction": FakeCard(
+            "attraction",
+            (
+                face(
+                    types=("Artifact",),
+                    subtypes=("Attraction",),
+                ),
+            ),
+        ),
+        "ordinary": FakeCard(
+            "ordinary",
+            (face(types=("Artifact",)),),
+        ),
+    }
+
+    db = FakeDB(
+        cards,
+        legal=set(cards),
+        tags={
+            "draft-matters": frozenset(),
+            "ante-matters": frozenset(),
+            "dexterity": frozenset(),
+        },
+    )
+
+    assert CardPolicy().eligible_cards(db) == {"ordinary"}
