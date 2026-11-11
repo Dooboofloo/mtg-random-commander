@@ -70,6 +70,7 @@ are over represented.
 """
 BROAD_CONCEPTS = {
     "creature",
+    "land",
 }
 
 def concept_is_too_broad(slug: str) -> bool:
@@ -160,6 +161,9 @@ def concept_pool_from_slug(db: CardDatabase, slug: str) -> set[str]:
                 for part in concept_tag.split("-"):
                     pool |= concept_pool_from_slug(db, part)
     
+    # TODO: Automatic type matching for tags caring about specific type lines.
+    # ex. "synergy-artifact-creature" or "synergy-equipment-legendary" (but not "historic")
+    
     return pool
 
 ### Individual Parsers
@@ -229,6 +233,9 @@ animate-*
 sneak / sneak-*
 flicker-*
 cost-reducer-*
+
+OTHER NOTES:
+Certain tags rely on token types, for example synergy-scion/spawn/saproling. That is not being considered yet.
 """
 
 PARSERS = [
@@ -257,6 +264,11 @@ def update_parsed_tags(db: CardDatabase):
     Unparsed -> Currently no support (SynergyPackage is None)
     Partially Parsed -> Synergy matching currently only finds same-tag cards
     Parsed -> Synergy matches same-tag cards as well as inferred concepts
+
+    Note that some cards marked partially parsed may actually be in a finished state.
+    ex. The tag "forestfall" is currently marked as partially parsed. However,
+    it is in a fully parsed state because we disregard lands when determining synergy matches.
+    (Thus the only matches can be those that share the tag)
     """
 
     from pathlib import Path
