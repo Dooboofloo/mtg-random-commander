@@ -32,14 +32,20 @@ python main.py --commander "Karn, Legacy Reforged"
 python main.py --count 5
 python main.py --lands 37 --seed 42
 python main.py --package ramp=8-10 --package draw=5-7
-python main.py --no-packages
+python main.py --synergy-percent 0.25
+python main.py --no-packages --synergy-percent 0
 python main.py --update-db
 python main.py --database path/to/custom.sqlite
 ```
 
 Functional packages are enabled by default: ramp (7–12), interaction (7–12),
 and card draw (5–9). The `--package` option overrides individual count ranges;
-`--no-packages` disables them.
+`--no-packages` disables functional packages.
+
+Commander synergy selection defaults to 40% of the nonland slots remaining
+after planned functional package allocations. Use `--synergy-percent` to
+configure this fraction between 0 and 1. Cards with no recognized synergy
+are replaced by miscellaneous selections.
 
 With `run.bat`, arguments can also be passed through, e.g. `run.bat --update-db`.
 **Updates are opt-in.** An existing database is opened without any download.

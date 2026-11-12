@@ -57,11 +57,12 @@ def test_cli_generates_deck(
     ):
         builds.append((db, settings, commander_candidates))
         return (
-            SimpleNamespace(commanders=("cmd",)),
+            SimpleNamespace(commanders=("cmd",), entries=()),
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
                 allocations=(),
+                synergy_slots=0,
             ),
         )
 
@@ -114,11 +115,12 @@ def test_cli_update_flag_passes_to_database(
     monkeypatch.setattr(
         cli, "build_deck",
         lambda db, settings, *, rng, on_progress=None, commander_candidates=None: (
-            SimpleNamespace(commanders=("cmd",)),
+            SimpleNamespace(commanders=("cmd",), entries=()),
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
                 allocations=(),
+                synergy_slots=0,
             ),
         ),
     )
@@ -202,11 +204,12 @@ def test_named_commander_skips_pool_preparation(
     monkeypatch.setattr(
         cli, "build_deck",
         lambda db, settings, **kwargs: (
-            SimpleNamespace(commanders=("cmd",)),
+            SimpleNamespace(commanders=("cmd",), entries=()),
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
                 allocations=(),
+                synergy_slots=0,
             ),
         ),
     )
@@ -248,3 +251,20 @@ def test_cli_rejects_unknown_package_and_duplicate_override():
         cli._configure_packages(["foobar=2"], False, parser)
     with pytest.raises(SystemExit):
         cli._configure_packages(["ramp=2", "ramp=3"], False, parser)
+
+def test_synergy_cli_fraction_validation():
+    assert cli._synergy_percent("0") == 0
+    assert cli._synergy_percent("0.4") == 0.4
+    assert cli._synergy_percent("1") == 1
+
+    for bad in (
+        "-0.1",
+        "1.1",
+        "nan",
+        "inf",
+        "invalid",
+    ):
+        with pytest.raises(
+            cli.argparse.ArgumentTypeError
+        ):
+            cli._synergy_percent(bad)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from dataclasses import replace
+from math import isfinite
 from time import perf_counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -78,6 +79,22 @@ def _configure_packages(
     return tuple(definitions[package.role] for package in DEFAULT_PACKAGES)
 
 
+def _synergy_percent(value: str) -> float:
+    try:
+        result = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected a fraction between 0 and 1"
+        ) from exc
+
+    if not isfinite(result) or not 0 <= result <= 1:
+        raise argparse.ArgumentTypeError(
+            "Expected a fraction between 0 and 1"
+        )
+
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate random Commander decks."
@@ -128,6 +145,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--synergy-percent",
+        type=_synergy_percent,
+        default=0.4,
+        metavar="FRACTION",
+        help="Share of post-package nonland slots reserved for synergy (0-1)",
+    )
+
+    parser.add_argument(
         "--include-banned",
         action="store_true",
     )
@@ -160,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=args.seed,
         include_banned=args.include_banned,
         packages=_configure_packages(args.package, args.no_packages, parser),
+        synergy_percent=args.synergy_percent,
     )
 
     rng = Random(settings.seed)
@@ -244,20 +270,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"({elapsed:.1f}s) -> {output}"
                 )
 
+                roles = Counter()
+
+                for entry in deck.entries:
+                    if entry.slot == "nonland":
+                        roles[entry.role] += entry.quantity
+
                 if plan.allocations:
-                    roles = Counter()
-                    for entry in deck.entries:
-                        if entry.slot == "nonland":
-                            roles[entry.role] += entry.quantity
                     details = ", ".join(
                         f"{allocation.role} "
                         f"{roles[allocation.role]}/{allocation.target}"
                         for allocation in plan.allocations
                     )
-                    print(
-                        f"{prefix} Packages: {details}; "
-                        f"misc {roles['misc']}"
-                    )
+
+                    print(f"{prefix} Packages: {details}")
+
+                print(
+                    f"{prefix} Synergy: "
+                    f"{roles['synergy']}/{plan.synergy_slots}; "
+                    f"misc {roles['misc']}"
+                )
 
     except Exception as exc:
         print(

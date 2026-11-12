@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from .models import Deck, DeckPlan, DeckSettings
 from .packages import fill_packages, roll_allocations
 from .policy import CardPolicy, can_be_commander
+from .synergy import fill_synergy
 
 if TYPE_CHECKING:
     from mtg_carddb import CardDatabase
@@ -146,6 +147,9 @@ def validate_deck(
             raise ValueError(
                 f"Package {allocation.role!r} exceeds its planned target"
             )
+
+    if role_counts["synergy"] > plan.synergy_slots:
+        raise ValueError("Synergy exceeds its planned target")
     
     for entry in deck.entries:
         if (
@@ -165,7 +169,7 @@ def build_deck(
     on_progress: Callable[[str], None] | None = None,
     commander_candidates: frozenset[str] | None = None,
 ) -> tuple[Deck, DeckPlan]:
-    """Generate a single-commander deck with an all-basic mana base."""
+    """Generate a single-commander deck with functional packages and synergy."""
 
     rng = rng if rng is not None else Random(settings.seed)
 
@@ -175,7 +179,7 @@ def build_deck(
     )
 
     if on_progress:
-        on_progress("1/5 - Choosing commander...")
+        on_progress("1/6 - Choosing commander...")
 
     commander_id = _choose_commander(
         db,
@@ -186,17 +190,29 @@ def build_deck(
     )
 
     land_slots = rng.randint(*settings.land_range)
+
+    allocations = roll_allocations(
+        settings.packages,
+        99 - land_slots,
+        rng,
+    )
+
+    remaining = 99 - land_slots - sum(
+        allocation.target for allocation in allocations
+    )
+
     plan = DeckPlan(
         land_slots=land_slots,
-        allocations=roll_allocations(
-            settings.packages, 99 - land_slots, rng
+        allocations=allocations,
+        synergy_slots=int(
+            remaining * settings.synergy_percent
         ),
     )
 
     deck = Deck(commanders=(commander_id,))
 
     if on_progress:
-        on_progress("2/5 - Finding eligible cards...")
+        on_progress("2/6 - Finding eligible cards...")
 
     legal = policy.cards_for_commanders(
         db,
@@ -204,10 +220,12 @@ def build_deck(
     )
 
     if on_progress:
-        on_progress("3/5 - Selecting nonland cards...")
+        on_progress("3/6 - Selecting functional packages...")
 
-    # Exclude every card with a Land face for now.
-    spell_pool = sorted(legal - db.by_type("Land"))
+    # Cards with any Land face remain excluded for now.
+    spell_pool = sorted(
+        legal - db.by_type("Land")
+    )
 
     if len(spell_pool) < plan.nonland_slots:
         raise ValueError(
@@ -216,18 +234,41 @@ def build_deck(
         )
 
     available = set(spell_pool)
+
     fill_packages(
-        db, deck, settings.packages, plan.allocations, available, rng
+        db,
+        deck,
+        settings.packages,
+        plan.allocations,
+        available,
+        rng,
     )
 
-    # Fill all unclaimed package slots and planned miscellaneous slots.
-    remaining = plan.nonland_slots - deck.nonland_count
-    for cid in rng.sample(sorted(available), remaining):
-        deck.add(cid, slot="nonland", role="misc")
-
-    # Basics: distribute approximately evenly across colors.
     if on_progress:
-        on_progress("4/5 - Allocating basic lands...")
+        on_progress("4/6 - Selecting commander synergies...")
+
+    fill_synergy(
+        db,
+        deck,
+        commander_id,
+        available,
+        plan.synergy_slots,
+        rng,
+    )
+
+    # Unfilled functional and synergy allocations
+    # become miscellaneous slots.
+    remaining = plan.nonland_slots - deck.nonland_count
+
+    for cid in rng.sample(sorted(available), remaining):
+        deck.add(
+            cid,
+            slot="nonland",
+            role="misc",
+        )
+
+    if on_progress:
+        on_progress("5/6 - Allocating basic lands...")
 
     colors = db[commander_id].color_identity
 
@@ -257,7 +298,11 @@ def build_deck(
         quantity = quantities[name]
 
         if quantity:
-            cid = _basic_land_id(db, legal, name)
+            cid = _basic_land_id(
+                db,
+                legal,
+                name,
+            )
 
             deck.add(
                 cid,
@@ -267,8 +312,13 @@ def build_deck(
             )
 
     if on_progress:
-        on_progress("5/5 - Validating deck...")
+        on_progress("6/6 - Validating deck...")
 
-    validate_deck(db, deck, plan, policy)
+    validate_deck(
+        db,
+        deck,
+        plan,
+        policy,
+    )
 
     return deck, plan

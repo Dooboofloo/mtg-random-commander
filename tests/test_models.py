@@ -61,3 +61,39 @@ def test_commander_cannot_be_in_mainboard():
             slot="nonland",
             role="misc",
         )
+
+def test_synergy_targets_are_bounded():
+    from mtg_random_commander.models import (
+        DeckPackage,
+        PackageAllocation,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="synergy_percent",
+    ):
+        DeckSettings(
+            synergy_percent=float("nan")
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="Package and synergy targets",
+    ):
+        DeckPlan(
+            land_slots=37,
+            allocations=(
+                PackageAllocation("ramp", 30),
+            ),
+            synergy_slots=33,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="reserved role",
+    ):
+        DeckPackage(
+            "synergy",
+            ("draw",),
+            (3, 5),
+        )

@@ -284,11 +284,12 @@ def test_build_reports_progress(db):
     )
 
     assert messages == [
-        "1/5 - Choosing commander...",
-        "2/5 - Finding eligible cards...",
-        "3/5 - Selecting nonland cards...",
-        "4/5 - Allocating basic lands...",
-        "5/5 - Validating deck...",
+        "1/6 - Choosing commander...",
+        "2/6 - Finding eligible cards...",
+        "3/6 - Selecting functional packages...",
+        "4/6 - Selecting commander synergies...",
+        "5/6 - Allocating basic lands...",
+        "6/6 - Validating deck...",
     ]
 
 
@@ -398,6 +399,7 @@ def test_functional_packages_are_filled_without_duplicates(db, monkeypatch):
         commander_name="Test Commander",
         land_range=(37, 37),
         seed=7,
+        synergy_percent=0.0,
         packages=(
             DeckPackage("ramp", ("ramp",), (2, 2)),
             DeckPackage("interaction", ("removal", "counterspell"), (2, 2)),
@@ -473,3 +475,77 @@ def test_packages_can_be_disabled(db):
     )
     assert plan.allocations == ()
     assert {entry.role for entry in deck.entries if entry.slot == "nonland"} == {"misc"}
+
+def test_synergy_budget_and_misc_fallback(db, monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from mtg_random_commander.models import DeckPackage
+
+    original = db.cards["spell-001"]
+
+    db.cards["spell-001"] = replace(
+        original,
+        faces=(
+            replace(
+                original.faces[0],
+                subtypes=frozenset({"Elf"}),
+            ),
+        ),
+    )
+
+    db.types = frozenset({"Creature", "Land"})
+    db.supertypes = frozenset({"Legendary", "Basic"})
+    db.subtypes = frozenset({"Elf"})
+    db.keywords = frozenset()
+
+    monkeypatch.setattr(
+        db,
+        "taggings_for",
+        lambda cid: (
+            SimpleNamespace(tag_slug="typal-elf"),
+        ),
+    )
+
+    monkeypatch.setattr(
+        db,
+        "by_tag",
+        lambda slug, **kwargs: frozenset(),
+    )
+
+    deck, plan = build_deck(
+        db,
+        DeckSettings(
+            commander_name="Test Commander",
+            land_range=(37, 37),
+            seed=42,
+            packages=(
+                DeckPackage(
+                    "ramp", ("ramp",), (3, 3),
+                ),
+            ),
+            synergy_percent=0.5,
+        ),
+    )
+
+    assert plan.package_slots == 3
+    assert plan.synergy_slots == int((62 - 3) * 0.5)
+    assert plan.misc_slots == 62 - 3 - plan.synergy_slots
+
+    assert sum(
+        entry.quantity
+        for entry in deck.entries
+        if entry.role == "synergy"
+    ) == 1
+
+    assert sum(
+        entry.quantity
+        for entry in deck.entries
+        if entry.role == "misc"
+    ) == 61
+
+    assert deck.total_count == 100
+    assert deck.quantities()["spell-001"] == 1
+
+    validate_deck(
+        db, deck, plan, CardPolicy()
+    )
