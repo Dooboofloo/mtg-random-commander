@@ -8,8 +8,8 @@ A random Commander deck generator using [MTG CardDB](https://github.com/Dooboofl
 
 Requires **Python 3.11+**. On Windows, download/extract the source and double-click
 **`run.bat`**. It will create a local virtual environment, install `mtg-carddb`
-when needed, initialize the card database on the first launch, and show a
-database summary. First initialization requires internet access; subsequent
+when needed, initialize the card database on the first launch, and generate a
+Commander deck. First initialization requires internet access; subsequent
 launches work offline. Data is stored in CardDB's per-user location, not inside
 this repository. If Python is not installed, the launcher cannot install it.
 
@@ -28,6 +28,9 @@ dependencies. The program initializes the database itself when necessary.
 ```sh
 python main.py --help
 python main.py
+python main.py --commander "Karn, Legacy Reforged"
+python main.py --count 5
+python main.py --lands 37 --seed 42
 python main.py --update-db
 python main.py --database path/to/custom.sqlite
 ```

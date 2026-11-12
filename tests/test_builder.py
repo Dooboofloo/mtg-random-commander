@@ -150,6 +150,27 @@ class FakeDB:
             if card.color_identity <= allowed
         )
 
+    def legalities_for(self, cid):
+        from types import SimpleNamespace
+
+        return (
+            SimpleNamespace(
+                format="commander",
+                status="legal",
+            ),
+        )
+
+    def taggings_for(self, cid):
+        return ()
+
+    def get_tag(self, slug):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            slug=slug,
+            parents=frozenset(),
+        )
+
 
 @pytest.fixture
 def db():
@@ -320,3 +341,43 @@ def test_precomputed_commander_pool_avoids_rescan(
 
     assert deck.commanders == ("cmd",)
     assert deck.total_count == 100
+
+def test_named_commander_uses_direct_eligibility(
+    db, monkeypatch
+):
+    from mtg_random_commander.builder import _choose_commander
+
+    def unexpected_bulk_query(*args, **kwargs):
+        raise AssertionError(
+            "Named commander selection must not "
+            "construct the full eligibility pool"
+        )
+
+    monkeypatch.setattr(
+        CardPolicy,
+        "eligible_cards",
+        unexpected_bulk_query,
+    )
+
+    checked = []
+
+    def fake_allows_card(self, database, oracle_id):
+        checked.append(oracle_id)
+        return True
+
+    monkeypatch.setattr(
+        CardPolicy,
+        "allows_card",
+        fake_allows_card,
+    )
+
+    commander_id = _choose_commander(
+        db,
+        CardPolicy(),
+        "Test Commander",
+        Random(42),
+    )
+
+    assert commander_id == "cmd"
+    assert checked == ["cmd"]
+    

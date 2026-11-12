@@ -1,1 +1,1 @@
-mtg-carddb>=1.0,<2.0
+mtg-carddb>=1.1,<2.0

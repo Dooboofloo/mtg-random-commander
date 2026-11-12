@@ -77,6 +77,80 @@ class CardPolicy:
 
         return frozenset(pool - excluded)
 
+    def allows_card(
+        self,
+        db: CardDatabase,
+        oracle_id: str,
+    ) -> bool:
+        """Check one card without hydrating bulk search indexes."""
+
+        if (
+            oracle_id in DEFAULT_HOUSE_BANS
+            or oracle_id in self.excluded_cards
+        ):
+            return False
+
+        card = db[oracle_id]
+
+        if any(
+            "Stickers" in face.types
+            or "Conspiracy" in face.types
+            or "Attraction" in face.subtypes
+            for face in card.faces
+        ):
+            return False
+
+        allowed_statuses = {"legal"}
+        if self.include_banned:
+            allowed_statuses.add("banned")
+
+        if not any(
+            legality.format == "commander"
+            and legality.status in allowed_statuses
+            for legality in db.legalities_for(oracle_id)
+        ):
+            return False
+
+        # Resolve configured exclusions to canonical tag slugs.
+        excluded_tags = set()
+
+        for slug in self.excluded_tags:
+            tag = db.get_tag(slug)
+
+            if tag is None:
+                raise ValueError(
+                    f"Unknown excluded Oracle Tag: {slug!r}"
+                )
+
+            excluded_tags.add(tag.slug)
+
+        # CardDB returns direct taggings. Walk parent tags to
+        # reproduce by_tag(..., include_descendants=True).
+        pending = [
+            tagging.tag_slug
+            for tagging in db.taggings_for(oracle_id)
+        ]
+
+        visited = set()
+
+        while pending:
+            slug = pending.pop()
+
+            if slug in visited:
+                continue
+
+            visited.add(slug)
+
+            if slug in excluded_tags:
+                return False
+
+            tag = db.get_tag(slug)
+
+            if tag is not None:
+                pending.extend(tag.parents)
+
+        return True
+
     def commander_candidates(self, db: CardDatabase) -> frozenset[str]:
         """Eligible single-commander candidates."""
 

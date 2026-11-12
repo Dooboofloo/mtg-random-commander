@@ -16,13 +16,7 @@ class FakeDatabase:
         return SimpleNamespace(name="Test Commander")
 
 @pytest.fixture(autouse=True)
-def mock_policy_queries(monkeypatch):
-    monkeypatch.setattr(
-        cli.CardPolicy,
-        "eligible_cards",
-        lambda self, db: frozenset({"cmd"}),
-    )
-
+def mock_commander_candidates(monkeypatch):
     monkeypatch.setattr(
         cli.CardPolicy,
         "commander_candidates",
@@ -89,8 +83,6 @@ def test_cli_generates_deck(
 
     output = capsys.readouterr().out
 
-    assert "Preparing card database for generation..." in output
-    assert "Card database ready" in output
     assert "Preparing eligible commander pool..." in output
     assert "Created Test Commander" in output
 
@@ -164,6 +156,7 @@ def test_cli_invalid_count():
     assert exc.value.code == 2
 
 
+
 def test_named_commander_skips_pool_preparation(
     tmp_path, monkeypatch
 ):
@@ -173,10 +166,21 @@ def test_named_commander_skips_pool_preparation(
             "full commander enumeration"
         )
 
+    def unexpected_bulk_query(self, db):
+        raise AssertionError(
+            "CLI must not preload the full eligible-card pool"
+        )
+
     monkeypatch.setattr(
         cli.CardPolicy,
         "commander_candidates",
         unexpected_scan,
+    )
+
+    monkeypatch.setattr(
+        cli.CardPolicy,
+        "eligible_cards",
+        unexpected_bulk_query,
     )
 
     class FakeCardDatabase:

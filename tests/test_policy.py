@@ -261,3 +261,60 @@ def test_stickers_and_attractions_are_excluded():
     )
 
     assert CardPolicy().eligible_cards(db) == {"ordinary"}
+
+def test_direct_eligibility_checks_legality_and_tag_ancestors():
+    from types import SimpleNamespace
+
+    cards = {
+        cid: FakeCard(
+            cid,
+            (face(types=("Creature",)),),
+        )
+        for cid in ("ordinary", "banned", "tagged")
+    }
+
+    class DirectDB(FakeDB):
+        def legalities_for(self, cid):
+            status = "banned" if cid == "banned" else "legal"
+
+            return (
+                SimpleNamespace(
+                    format="commander",
+                    status=status,
+                ),
+            )
+
+        def taggings_for(self, cid):
+            if cid == "tagged":
+                return (
+                    SimpleNamespace(tag_slug="draft-child"),
+                )
+            return ()
+
+        def get_tag(self, slug):
+            parents = (
+                frozenset({"draft-matters"})
+                if slug == "draft-child"
+                else frozenset()
+            )
+
+            return SimpleNamespace(
+                slug=slug,
+                parents=parents,
+            )
+
+    db = DirectDB(
+        cards,
+        legal={"ordinary", "tagged"},
+        banned={"banned"},
+    )
+
+    policy = CardPolicy()
+
+    assert policy.allows_card(db, "ordinary")
+    assert not policy.allows_card(db, "banned")
+    assert not policy.allows_card(db, "tagged")
+
+    assert CardPolicy(
+        include_banned=True
+    ).allows_card(db, "banned")

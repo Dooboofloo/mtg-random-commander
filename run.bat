@@ -24,8 +24,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Verify that mtg-carddb 1.x exists before installing. No network on later runs.
-".venv\Scripts\python.exe" -c "from importlib.metadata import version; v=version('mtg-carddb'); assert int(v.split('.')[0]) == 1" >nul 2>nul
+rem Require mtg-carddb 1.1+ while preserving offline subsequent launches.
+".venv\Scripts\python.exe" -c "from importlib.metadata import version; v=tuple(map(int, version('mtg-carddb').split('.')[:2])); assert (1, 1) <= v < (2, 0)" >nul 2>nul
 if errorlevel 1 (
     echo Installing Python dependencies...
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt

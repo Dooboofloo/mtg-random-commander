@@ -38,8 +38,9 @@ def _choose_commander(
     if name is not None:
         matches = sorted(
             cid
-            for cid in db.by_name(name) & policy.eligible_cards(db)
-            if can_be_commander(db[cid])
+            for cid in db.by_name(name)
+            if policy.allows_card(db, cid)
+            and can_be_commander(db[cid])
         )
 
         if not matches:
@@ -48,7 +49,9 @@ def _choose_commander(
             )
 
         if len(matches) != 1:
-            choices = ", ".join(db[cid].name for cid in matches)
+            choices = ", ".join(
+                db[cid].name for cid in matches
+            )
             raise ValueError(
                 f"Ambiguous commander {name!r}: {choices}"
             )

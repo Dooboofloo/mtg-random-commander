@@ -118,28 +118,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         with CardDatabase.open(path) as db:
-            # Warm CardDB's lazily loaded indexes before generation.
-            print("Preparing card database for generation...", flush=True)
-            started = perf_counter()
-
-            policy = CardPolicy(
-                include_banned=settings.include_banned,
-                excluded_cards=settings.excluded_cards,
-            )
-
-            policy.eligible_cards(db)
-
-            print(
-                f"Card database ready ({perf_counter() - started:.1f}s).",
-                flush=True,
-            )
-
-            # Build the commander pool only for random selection.
             commander_candidates = None
 
             if settings.commander_name is None:
-                print("Preparing eligible commander pool...", flush=True)
+                print(
+                    "Preparing eligible commander pool...",
+                    flush=True,
+                )
+
                 started = perf_counter()
+
+                policy = CardPolicy(
+                    include_banned=settings.include_banned,
+                    excluded_cards=settings.excluded_cards,
+                )
 
                 commander_candidates = policy.commander_candidates(db)
 
