@@ -31,9 +31,15 @@ python main.py
 python main.py --commander "Karn, Legacy Reforged"
 python main.py --count 5
 python main.py --lands 37 --seed 42
+python main.py --package ramp=8-10 --package draw=5-7
+python main.py --no-packages
 python main.py --update-db
 python main.py --database path/to/custom.sqlite
 ```
+
+Functional packages are enabled by default: ramp (7–12), interaction (7–12),
+and card draw (5–9). The `--package` option overrides individual count ranges;
+`--no-packages` disables them.
 
 With `run.bat`, arguments can also be passed through, e.g. `run.bat --update-db`.
 **Updates are opt-in.** An existing database is opened without any download.

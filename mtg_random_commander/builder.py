@@ -1,7 +1,6 @@
-"""Minimal Commander generator: legal spells plus basic lands.
+"""Commander generator with functional packages and basic lands.
 
-Composition packages, synergy, nonbasics, and MDFC land
-accounting are deferred.
+Synergy, nonbasic lands, and MDFC land accounting are deferred.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from random import Random
 from typing import TYPE_CHECKING
 
 from .models import Deck, DeckPlan, DeckSettings
+from .packages import fill_packages, roll_allocations
 from .policy import CardPolicy, can_be_commander
 
 if TYPE_CHECKING:
@@ -137,6 +137,16 @@ def validate_deck(
                 f"Illegal duplicate: {db[cid].name}"
             )
 
+    role_counts = Counter()
+    for entry in deck.entries:
+        if entry.slot == "nonland":
+            role_counts[entry.role] += entry.quantity
+    for allocation in plan.allocations:
+        if role_counts[allocation.role] > allocation.target:
+            raise ValueError(
+                f"Package {allocation.role!r} exceeds its planned target"
+            )
+    
     for entry in deck.entries:
         if (
             entry.slot == "land"
@@ -175,8 +185,12 @@ def build_deck(
         candidates=commander_candidates,
     )
 
+    land_slots = rng.randint(*settings.land_range)
     plan = DeckPlan(
-        land_slots=rng.randint(*settings.land_range)
+        land_slots=land_slots,
+        allocations=roll_allocations(
+            settings.packages, 99 - land_slots, rng
+        ),
     )
 
     deck = Deck(commanders=(commander_id,))
@@ -201,12 +215,15 @@ def build_deck(
             f"need {plan.nonland_slots}"
         )
 
-    for cid in rng.sample(spell_pool, plan.nonland_slots):
-        deck.add(
-            cid,
-            slot="nonland",
-            role="misc",
-        )
+    available = set(spell_pool)
+    fill_packages(
+        db, deck, settings.packages, plan.allocations, available, rng
+    )
+
+    # Fill all unclaimed package slots and planned miscellaneous slots.
+    remaining = plan.nonland_slots - deck.nonland_count
+    for cid in rng.sample(sorted(available), remaining):
+        deck.add(cid, slot="nonland", role="misc")
 
     # Basics: distribute approximately evenly across colors.
     if on_progress:

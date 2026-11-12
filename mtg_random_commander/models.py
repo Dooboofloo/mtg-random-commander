@@ -10,12 +10,36 @@ Slot = Literal["land", "nonland"]
 
 
 @dataclass(frozen=True)
+class DeckPackage:
+    role: str
+    tags: tuple[str, ...]
+    count_range: tuple[int, int]
+
+    def __post_init__(self) -> None:
+        if not self.role or self.role in {"misc", "basic-land"}:
+            raise ValueError("Package requires a distinct non-reserved role")
+        if not self.tags or any(not tag for tag in self.tags):
+            raise ValueError("Package requires at least one Oracle Tag")
+        low, high = self.count_range
+        if not 0 <= low <= high <= 99:
+            raise ValueError("Package count range must be ordered and within 0-99")
+
+
+DEFAULT_PACKAGES = (
+    DeckPackage("ramp", ("ramp",), (7, 12)),
+    DeckPackage("interaction", ("removal", "counterspell"), (7, 12)),
+    DeckPackage("draw", ("draw",), (5, 9)),
+)
+
+
+@dataclass(frozen=True)
 class DeckSettings:
     commander_name: str | None = None  # None means random
     land_range: tuple[int, int] = (34, 40)
     seed: int | None = None
     include_banned: bool = False
     excluded_cards: frozenset[str] = frozenset()
+    packages: tuple[DeckPackage, ...] = DEFAULT_PACKAGES
 
     def __post_init__(self) -> None:
         low, high = self.land_range
@@ -23,18 +47,37 @@ class DeckSettings:
             raise ValueError("land_range must be ordered and between 0 and 99")
         if self.commander_name is not None and not self.commander_name.strip():
             raise ValueError("commander_name cannot be blank")
+        roles = [package.role for package in self.packages]
+        if len(roles) != len(set(roles)):
+            raise ValueError("Package roles must be unique")
+
+
+@dataclass(frozen=True)
+class PackageAllocation:
+    role: str
+    target: int
+
+    def __post_init__(self) -> None:
+        if not self.role or self.target < 0:
+            raise ValueError("Package allocation requires a role and nonnegative target")
 
 
 @dataclass(frozen=True)
 class DeckPlan:
     land_slots: int
     commander_count: int = 1
+    allocations: tuple[PackageAllocation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.commander_count not in (1, 2):
             raise ValueError("A deck must have one or two commanders")
         if not 0 <= self.land_slots <= self.mainboard_slots:
             raise ValueError("land_slots exceeds the available mainboard slots")
+        roles = [allocation.role for allocation in self.allocations]
+        if len(roles) != len(set(roles)):
+            raise ValueError("Package allocation roles must be unique")
+        if self.package_slots > self.nonland_slots:
+            raise ValueError("Package targets exceed available nonland slots")
 
     @property
     def mainboard_slots(self) -> int:
@@ -44,6 +87,13 @@ class DeckPlan:
     def nonland_slots(self) -> int:
         return self.mainboard_slots - self.land_slots
 
+    @property
+    def package_slots(self) -> int:
+        return sum(allocation.target for allocation in self.allocations)
+
+    @property
+    def misc_slots(self) -> int:
+        return self.nonland_slots - self.package_slots
 
 @dataclass(frozen=True)
 class DeckEntry:

@@ -22,6 +22,16 @@ DEFAULT_HOUSE_BANS = frozenset({
 
     # Shahrazad
     "fc04f621-338b-4d4c-bf57-5e5a00d990f0",
+
+    # Wish-only cards
+    "13a884b5-8970-4d71-9082-a8b6c8db9a01",  # Burning Wish
+    "bdf80a55-b524-4d17-9be8-a0005403a0e7",  # Cunning Wish
+    "1f47c869-f4a9-43b0-aec0-8da4e3a3fec5",  # Extrapolate the Impossible
+    "45c29ac0-f9ca-4ab9-b93e-8b678509bcd7",  # Glittering Wish
+    "e5f25cbd-39e4-4806-8dba-9a552356696d",  # Golden Wish
+    "b9d186f5-1c92-4539-a5b5-e7fbd4b726fe",  # Living Wish
+    "c79b9187-cbfe-43a0-bdc8-4f7e0d215607",  # Ring of Ma'rûf
+    "2ccbf0ee-c856-4f67-8579-811fe8571a2e",  # Wish
 })
 
 

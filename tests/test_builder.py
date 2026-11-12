@@ -380,4 +380,96 @@ def test_named_commander_uses_direct_eligibility(
 
     assert commander_id == "cmd"
     assert checked == ["cmd"]
-    
+
+
+def test_functional_packages_are_filled_without_duplicates(db, monkeypatch):
+    from collections import Counter
+    from mtg_random_commander.models import DeckPackage
+
+    tagged = {
+        "ramp": {"spell-000", "spell-001", "spell-002", "mdfc", "blue"},
+        "removal": {"spell-001", "spell-003", "spell-004"},
+        "counterspell": {"spell-005"},
+        "draw": {"spell-005", "spell-006", "spell-007", "spell-008"},
+    }
+    monkeypatch.setattr(db, "by_tag", lambda tag: frozenset(tagged.get(tag, ())))
+
+    settings = DeckSettings(
+        commander_name="Test Commander",
+        land_range=(37, 37),
+        seed=7,
+        packages=(
+            DeckPackage("ramp", ("ramp",), (2, 2)),
+            DeckPackage("interaction", ("removal", "counterspell"), (2, 2)),
+            DeckPackage("draw", ("draw",), (2, 2)),
+        ),
+    )
+    deck, plan = build_deck(db, settings)
+    roles = Counter(entry.role for entry in deck.entries if entry.slot == "nonland")
+
+    assert (roles["ramp"], roles["interaction"], roles["draw"]) == (2, 2, 2)
+    assert roles["misc"] == 56
+    assert plan.package_slots == 6
+    assert plan.misc_slots == 56
+    assert deck.total_count == 100
+    assert not ({"blue", "mdfc"} & deck.quantities().keys())
+    assert all(
+        count == 1 for cid, count in deck.quantities().items()
+        if cid not in {"swamp", "forest"}
+    )
+    validate_deck(db, deck, plan, CardPolicy())
+
+
+def test_package_shortfalls_go_to_misc(db, monkeypatch):
+    from collections import Counter
+    from mtg_random_commander.models import DeckPackage
+
+    monkeypatch.setattr(
+        db, "by_tag",
+        lambda tag: frozenset({"spell-000"}) if tag == "ramp" else frozenset(),
+    )
+    settings = DeckSettings(
+        commander_name="Test Commander",
+        land_range=(37, 37),
+        seed=5,
+        packages=(
+            DeckPackage("ramp", ("ramp",), (4, 4)),
+            DeckPackage("draw", ("draw",), (3, 3)),
+        ),
+    )
+    deck, plan = build_deck(db, settings)
+    roles = Counter(entry.role for entry in deck.entries if entry.slot == "nonland")
+
+    assert plan.package_slots == 7
+    assert roles["ramp"] == 1
+    assert roles["draw"] == 0
+    assert roles["misc"] == 61
+    assert deck.total_count == 100
+
+
+def test_package_overcommit_is_rejected(db):
+    from mtg_random_commander.models import DeckPackage
+
+    with pytest.raises(ValueError, match="Package targets require"):
+        build_deck(
+            db,
+            DeckSettings(
+                commander_name="Test Commander",
+                land_range=(80, 80),
+                packages=(DeckPackage("ramp", ("ramp",), (20, 20)),),
+            ),
+        )
+
+
+def test_packages_can_be_disabled(db):
+    deck, plan = build_deck(
+        db,
+        DeckSettings(
+            commander_name="Test Commander",
+            land_range=(37, 37),
+            packages=(),
+            seed=3,
+        ),
+    )
+    assert plan.allocations == ()
+    assert {entry.role for entry in deck.entries if entry.slot == "nonland"} == {"misc"}

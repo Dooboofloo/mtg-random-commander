@@ -61,6 +61,7 @@ def test_cli_generates_deck(
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
+                allocations=(),
             ),
         )
 
@@ -117,6 +118,7 @@ def test_cli_update_flag_passes_to_database(
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
+                allocations=(),
             ),
         ),
     )
@@ -204,6 +206,7 @@ def test_named_commander_skips_pool_preparation(
             SimpleNamespace(
                 land_slots=37,
                 nonland_slots=62,
+                allocations=(),
             ),
         ),
     )
@@ -217,3 +220,31 @@ def test_named_commander_skips_pool_preparation(
         "--commander", "Test Commander",
         "--database", str(tmp_path / "carddb.sqlite"),
     ]) == 0
+
+
+def test_cli_package_overrides():
+    parser = cli.build_parser()
+    args = parser.parse_args(["--package", "ramp=9-11", "--package", "draw=0"])
+    packages = cli._configure_packages(args.package, args.no_packages, parser)
+    targets = {package.role: package.count_range for package in packages}
+    assert targets == {
+        "ramp": (9, 11),
+        "interaction": (7, 12),
+        "draw": (0, 0),
+    }
+
+
+def test_cli_disables_packages_and_rejects_conflicts():
+    parser = cli.build_parser()
+    assert cli._configure_packages([], True, parser) == ()
+    with pytest.raises(SystemExit) as exc:
+        cli._configure_packages(["ramp=10"], True, parser)
+    assert exc.value.code == 2
+
+
+def test_cli_rejects_unknown_package_and_duplicate_override():
+    parser = cli.build_parser()
+    with pytest.raises(SystemExit):
+        cli._configure_packages(["foobar=2"], False, parser)
+    with pytest.raises(SystemExit):
+        cli._configure_packages(["ramp=2", "ramp=3"], False, parser)

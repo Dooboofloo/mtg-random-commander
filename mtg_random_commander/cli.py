@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from dataclasses import replace
 from time import perf_counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -14,7 +16,7 @@ from mtg_carddb import CardDatabase
 from .builder import build_deck
 from .database import ensure_database
 from .export import save_decklist
-from .models import DeckSettings
+from .models import DEFAULT_PACKAGES, DeckPackage, DeckSettings
 from .policy import CardPolicy
 
 
@@ -38,6 +40,42 @@ def _land_range(value: str) -> tuple[int, int]:
         )
 
     return low, high
+
+
+def _configure_packages(
+    overrides: list[str],
+    disabled: bool,
+    parser: argparse.ArgumentParser,
+) -> tuple[DeckPackage, ...]:
+    if disabled:
+        if overrides:
+            parser.error("--no-packages cannot be combined with --package")
+        return ()
+
+    definitions = {package.role: package for package in DEFAULT_PACKAGES}
+    seen: set[str] = set()
+
+    for option in overrides:
+        role, separator, value = option.partition("=")
+        if not separator or role not in definitions:
+            parser.error(
+                f"Invalid --package {option!r}; "
+                "expected ramp, interaction, or draw followed by =N or =MIN-MAX"
+            )
+        if role in seen:
+            parser.error(f"Package {role!r} was specified more than once")
+        seen.add(role)
+
+        try:
+            count_range = _land_range(value)
+        except argparse.ArgumentTypeError as exc:
+            parser.error(f"Invalid --package {option!r}: {exc}")
+
+        definitions[role] = replace(
+            definitions[role], count_range=count_range
+        )
+
+    return tuple(definitions[package.role] for package in DEFAULT_PACKAGES)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -76,6 +114,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--package",
+        action="append",
+        default=[],
+        metavar="ROLE=N|MIN-MAX",
+        help="Override ramp, interaction, or draw package count; repeatable",
+    )
+
+    parser.add_argument(
+        "--no-packages",
+        action="store_true",
+        help="Use entirely random nonland selections",
+    )
+
+    parser.add_argument(
         "--include-banned",
         action="store_true",
     )
@@ -107,6 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         land_range=args.lands,
         seed=args.seed,
         include_banned=args.include_banned,
+        packages=_configure_packages(args.package, args.no_packages, parser),
     )
 
     rng = Random(settings.seed)
@@ -190,6 +243,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{plan.nonland_slots} nonlands "
                     f"({elapsed:.1f}s) -> {output}"
                 )
+
+                if plan.allocations:
+                    roles = Counter()
+                    for entry in deck.entries:
+                        if entry.slot == "nonland":
+                            roles[entry.role] += entry.quantity
+                    details = ", ".join(
+                        f"{allocation.role} "
+                        f"{roles[allocation.role]}/{allocation.target}"
+                        for allocation in plan.allocations
+                    )
+                    print(
+                        f"{prefix} Packages: {details}; "
+                        f"misc {roles['misc']}"
+                    )
 
     except Exception as exc:
         print(
