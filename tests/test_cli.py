@@ -268,3 +268,23 @@ def test_synergy_cli_fraction_validation():
             cli.argparse.ArgumentTypeError
         ):
             cli._synergy_percent(bad)
+
+def test_cli_land_settings():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--nonbasic-fraction", "0.6",
+        "--snow-chance", "0",
+    ])
+
+    assert args.nonbasic_fraction == 0.6
+    assert args.snow_chance == 0
+
+    defaults = parser.parse_args([])
+
+    assert defaults.nonbasic_fraction is None
+    assert defaults.snow_chance == 0.055
+
+    for option in ("--nonbasic-fraction", "--snow-chance"):
+        with pytest.raises(SystemExit):
+            parser.parse_args([option, "1.5"])

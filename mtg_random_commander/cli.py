@@ -153,6 +153,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--nonbasic-fraction",
+        type=_synergy_percent,
+        default=None,
+        metavar="FRACTION",
+        help="Target share of land slots filled with nonbasics (0-1)",
+    )
+
+    parser.add_argument(
+        "--snow-chance",
+        type=_synergy_percent,
+        default=0.055,
+        metavar="FRACTION",
+        help="Chance to use snow-covered basics when not forced by synergy",
+    )
+
+    parser.add_argument(
         "--include-banned",
         action="store_true",
     )
@@ -186,6 +202,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_banned=args.include_banned,
         packages=_configure_packages(args.package, args.no_packages, parser),
         synergy_percent=args.synergy_percent,
+        nonbasic_fraction=args.nonbasic_fraction,
+        snow_chance=args.snow_chance,
     )
 
     rng = Random(settings.seed)
@@ -289,6 +307,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{prefix} Synergy: "
                     f"{roles['synergy']}/{plan.synergy_slots}; "
                     f"misc {roles['misc']}"
+                )
+
+                land_roles = Counter()
+
+                for entry in deck.entries:
+                    if entry.slot == "land":
+                        land_roles[entry.role] += entry.quantity
+
+                nonbasics = (
+                    land_roles["nonbasic-land"]
+                    + land_roles["synergy-land"]
+                )
+
+                snow_basics = sum(
+                    entry.quantity
+                    for entry in deck.entries
+                    if entry.slot == "land"
+                    and entry.role == "basic-land"
+                    and db[entry.oracle_id].name.startswith("Snow-Covered ")
+                )
+
+                print(
+                    f"{prefix} Mana base: "
+                    f"{nonbasics} nonbasics "
+                    f"({land_roles['synergy-land']} synergy), "
+                    f"{land_roles['basic-land']} basics "
+                    f"({snow_basics} snow)"
                 )
 
     except Exception as exc:

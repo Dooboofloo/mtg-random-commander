@@ -42,6 +42,8 @@ class DeckSettings:
     excluded_cards: frozenset[str] = frozenset()
     packages: tuple[DeckPackage, ...] = DEFAULT_PACKAGES
     synergy_percent: float = 0.4
+    nonbasic_fraction: float | None = None
+    snow_chance: float = 0.055
 
     def __post_init__(self) -> None:
         low, high = self.land_range
@@ -51,6 +53,16 @@ class DeckSettings:
             raise ValueError("commander_name cannot be blank")
         if not isfinite(self.synergy_percent) or not 0 <= self.synergy_percent <= 1:
             raise ValueError("synergy_percent must be between 0 and 1")
+        if self.nonbasic_fraction is not None:
+            if (
+                not isfinite(self.nonbasic_fraction)
+                or not 0 <= self.nonbasic_fraction <= 1
+            ):
+                raise ValueError(
+                    "nonbasic_fraction must be between 0 and 1"
+                )
+        if not isfinite(self.snow_chance) or not 0 <= self.snow_chance <= 1:
+            raise ValueError("snow_chance must be between 0 and 1")
         roles = [package.role for package in self.packages]
         if len(roles) != len(set(roles)):
             raise ValueError("Package roles must be unique")

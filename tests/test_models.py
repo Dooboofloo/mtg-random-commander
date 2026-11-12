@@ -97,3 +97,15 @@ def test_synergy_targets_are_bounded():
             ("draw",),
             (3, 5),
         )
+
+def test_land_settings_are_bounded():
+    assert DeckSettings(nonbasic_fraction=None).nonbasic_fraction is None
+    assert DeckSettings(nonbasic_fraction=0).nonbasic_fraction == 0
+    assert DeckSettings(nonbasic_fraction=1).nonbasic_fraction == 1
+
+    for bad in (-0.1, 1.1, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="nonbasic_fraction"):
+            DeckSettings(nonbasic_fraction=bad)
+
+        with pytest.raises(ValueError, match="snow_chance"):
+            DeckSettings(snow_chance=bad)

@@ -25,6 +25,7 @@ class Face:
     oracle_text: str = ""
     power: str | None = None
     toughness: str | None = None
+    mana_cost: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,20 @@ class Card:
     name: str
     color_identity: frozenset[str]
     faces: tuple[Face, ...]
+    layout: str = "normal"
+    produced_mana: frozenset[str] = frozenset()
+
+    @property
+    def subtypes(self) -> frozenset[str]:
+        return frozenset().union(
+            *(face.subtypes for face in self.faces)
+        )
+
+    @property
+    def supertypes(self) -> frozenset[str]:
+        return frozenset().union(
+            *(face.supertypes for face in self.faces)
+        )
 
 
 class FakeDB:
@@ -74,6 +89,7 @@ class FakeDB:
                 Face(frozenset({"Instant"})),
                 Face(frozenset({"Land"})),
             ),
+            layout="modal_dfc",
         )
 
         for name in (
@@ -92,9 +108,30 @@ class FakeDB:
                 ),
             )
 
-    def _add(self, cid, name, colors, faces):
+            if name != "Wastes":
+                self._add(
+                    "snow-" + name.lower(),
+                    "Snow-Covered " + name,
+                    "",
+                    (
+                        Face(
+                            frozenset({"Land"}),
+                            frozenset({"Basic", "Snow"}),
+                        ),
+                    ),
+                )
+
+    def _add(
+        self, cid, name, colors, faces,
+        *, layout="normal", produced_mana=(),
+    ):
         self.cards[cid] = Card(
-            cid, name, frozenset(colors), faces
+            cid,
+            name,
+            frozenset(colors),
+            faces,
+            layout,
+            frozenset(produced_mana),
         )
 
     def __getitem__(self, cid):
@@ -136,6 +173,13 @@ class FakeDB:
             cid
             for cid, card in self.cards.items()
             if name.casefold() == card.name.casefold()
+        )
+
+    def produces_mana(self, color):
+        return frozenset(
+            cid
+            for cid, card in self.cards.items()
+            if color in card.produced_mana
         )
 
     def by_tag(self, slug):
@@ -182,6 +226,8 @@ def test_fixed_commander_basic_land_deck(db):
         commander_name="Test Commander",
         land_range=(37, 37),
         seed=12,
+        nonbasic_fraction=0,
+        snow_chance=0,
     )
 
     deck, plan = build_deck(db, settings)
@@ -192,7 +238,7 @@ def test_fixed_commander_basic_land_deck(db):
     assert deck.nonland_count == 62
 
     assert all(
-        cid not in {"blue", "mdfc", "cmd"}
+        cid not in {"blue", "cmd"}
         for cid in deck.quantities()
     )
 
@@ -288,7 +334,7 @@ def test_build_reports_progress(db):
         "2/6 - Finding eligible cards...",
         "3/6 - Selecting functional packages...",
         "4/6 - Selecting commander synergies...",
-        "5/6 - Allocating basic lands...",
+        "5/6 - Constructing mana base...",
         "6/6 - Validating deck...",
     ]
 
@@ -400,6 +446,8 @@ def test_functional_packages_are_filled_without_duplicates(db, monkeypatch):
         land_range=(37, 37),
         seed=7,
         synergy_percent=0.0,
+        nonbasic_fraction=0.0,
+        snow_chance=0.0,
         packages=(
             DeckPackage("ramp", ("ramp",), (2, 2)),
             DeckPackage("interaction", ("removal", "counterspell"), (2, 2)),
@@ -414,7 +462,7 @@ def test_functional_packages_are_filled_without_duplicates(db, monkeypatch):
     assert plan.package_slots == 6
     assert plan.misc_slots == 56
     assert deck.total_count == 100
-    assert not ({"blue", "mdfc"} & deck.quantities().keys())
+    assert "blue" not in deck.quantities()
     assert all(
         count == 1 for cid, count in deck.quantities().items()
         if cid not in {"swamp", "forest"}

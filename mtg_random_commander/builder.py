@@ -10,6 +10,7 @@ from collections.abc import Callable
 from random import Random
 from typing import TYPE_CHECKING
 
+from .lands import build_mana_base, candidate_pools, slot_eligible
 from .models import Deck, DeckPlan, DeckSettings
 from .packages import fill_packages, roll_allocations
 from .policy import CardPolicy, can_be_commander
@@ -17,15 +18,6 @@ from .synergy import fill_synergy
 
 if TYPE_CHECKING:
     from mtg_carddb import CardDatabase
-
-
-BASICS = {
-    "W": "Plains",
-    "U": "Island",
-    "B": "Swamp",
-    "R": "Mountain",
-    "G": "Forest",
-}
 
 
 def _choose_commander(
@@ -66,27 +58,6 @@ def _choose_commander(
         raise ValueError("No eligible commanders in the database")
 
     return rng.choice(sorted(candidates))
-
-
-def _basic_land_id(
-    db: CardDatabase,
-    legal_pool: frozenset[str],
-    name: str,
-) -> str:
-    matches = (
-        db.by_name(name)
-        & db.by_supertype("Basic")
-        & db.by_type("Land")
-        & legal_pool
-    )
-
-    if len(matches) != 1:
-        raise ValueError(
-            f"Expected one eligible basic land named "
-            f"{name!r}, found {len(matches)}"
-        )
-
-    return next(iter(matches))
 
 
 def validate_deck(
@@ -152,12 +123,9 @@ def validate_deck(
         raise ValueError("Synergy exceeds its planned target")
     
     for entry in deck.entries:
-        if (
-            entry.slot == "land"
-            and entry.oracle_id not in db.by_type("Land")
-        ):
+        if not slot_eligible(db[entry.oracle_id], entry.slot):
             raise ValueError(
-                f"Land slot contains a nonland: "
+                f"Card cannot occupy {entry.slot!r} slot: "
                 f"{db[entry.oracle_id].name}"
             )
 
@@ -222,10 +190,8 @@ def build_deck(
     if on_progress:
         on_progress("3/6 - Selecting functional packages...")
 
-    # Cards with any Land face remain excluded for now.
-    spell_pool = sorted(
-        legal - db.by_type("Land")
-    )
+    # Modal land/spell DFCs can enter either pool.
+    land_pool, spell_pool = candidate_pools(db, legal)
 
     if len(spell_pool) < plan.nonland_slots:
         raise ValueError(
@@ -268,48 +234,18 @@ def build_deck(
         )
 
     if on_progress:
-        on_progress("5/6 - Allocating basic lands...")
+        on_progress("5/6 - Constructing mana base...")
 
-    colors = db[commander_id].color_identity
-
-    land_names = [
-        name
-        for color, name in BASICS.items()
-        if color in colors
-    ]
-
-    if not land_names:
-        land_names = ["Wastes"]
-
-    each, remainder = divmod(
+    build_mana_base(
+        db,
+        deck,
+        legal,
+        land_pool,
         plan.land_slots,
-        len(land_names),
+        rng,
+        nonbasic_fraction=settings.nonbasic_fraction,
+        snow_chance=settings.snow_chance,
     )
-
-    quantities = Counter({
-        name: each for name in land_names
-    })
-
-    quantities.update(
-        rng.sample(land_names, remainder)
-    )
-
-    for name in sorted(quantities):
-        quantity = quantities[name]
-
-        if quantity:
-            cid = _basic_land_id(
-                db,
-                legal,
-                name,
-            )
-
-            deck.add(
-                cid,
-                slot="land",
-                role="basic-land",
-                quantity=quantity,
-            )
 
     if on_progress:
         on_progress("6/6 - Validating deck...")
