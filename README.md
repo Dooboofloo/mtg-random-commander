@@ -50,7 +50,14 @@ and card draw (5–9). The `--package` option overrides individual count ranges;
 Commander synergy selection defaults to 40% of the nonland slots remaining
 after planned functional package allocations. Use `--synergy-percent` to
 configure this fraction between 0 and 1. Cards with no recognized synergy
-are replaced by miscellaneous selections.
+are replaced by miscellaneous selections. Supported payoff tags, such as
+lifegain-matters and your-sacrifice-matters, also select cards with matching
+enabler tags. Tutor, copy, reanimation, regrowth, impulse, and cost-reduction
+tags can also select matching card types, subtypes, and abilities.
+Resource synergies connect graveyard fuel, sacrifice outlets, tap/untap
+effects, counters, and selected keyword abilities to useful supporting cards.
+Each commander synergy package is weighted independently during selection.
+Unrecognized tags remain unsupported.
 
 Mana bases mix random nonbasic lands, commander-synergy lands, and basics
 distributed according to colored mana costs. Modal land/spell DFCs can occupy

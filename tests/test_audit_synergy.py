@@ -53,7 +53,7 @@ class FakeDB:
         return tuple(SimpleNamespace(tag_slug=tag) for tag in self.commander_tags[cid])
 
     def by_tag(self, slug, *, include_descendants=True):
-        return frozenset(self.tags[slug])
+        return frozenset(self.tags.get(slug, ()))
 
     def by_subtype(self, subtype):
         return frozenset({"elf"} if subtype == "Elf" else ())
@@ -99,6 +99,9 @@ def test_family_priorities():
     assert family_for("typal-fungus") == "typal-*"
     assert family_for("landfall") == "*fall"
     assert family_for("lifegain-matters") == "*-matters"
+    assert family_for("pp-counters-matter") == "*-matters"
+    assert family_for("cycle-block-rav-colors-matter") == "other/cycle"
+    assert family_for("x-doesn-t-matter") == "other/x"
     assert family_for("graveyard-fuel-something") == "graveyard-fuel-*"
     assert family_for("cycle-whatever") == "other/cycle"
 
@@ -115,7 +118,7 @@ def test_coverage_distinguishes_parser_status_and_color_legal_pools():
     assert rows["typal-elf"]["direct_size"] == 2
     assert rows["typal-elf"]["inferred_size"] == 1
     assert rows["typal-coupling"]["status"] == "skipped"
-    assert rows["lifegain-matters"]["status"] == "unsupported"
+    assert rows["lifegain-matters"]["status"] == "direct-only"
     assert rows["synergy-unknown-concept"]["status"] == "recognized-empty"
     assert report["summary"]["commanders_with_actionable_synergy"] == 1
 
@@ -166,3 +169,42 @@ def test_inventory_and_report_are_deterministic():
     db = FakeDB()
     policy = FakePolicy()
     assert build_report(db, policy) == build_report(db, policy)
+
+def test_m8_nonland_inference_is_reported():
+    db = FakeDB()
+    db.commander_tags["green-cmd"] += ("synergy-token",)
+    db.tags["synergy-token"] = {"payoff"}
+    db.tags["repeatable-creature-tokens"] = {"elf"}
+
+    rows = {
+        row["tag"]: row
+        for row in build_report(db, FakePolicy())["tags"]
+    }
+
+    row = rows["synergy-token"]
+
+    assert row["status"] == "expanded"
+    assert row["eligible_nonland_inferred_size"] == 1
+    assert row["actionable_nonland_commanders"] == 1
+
+
+def test_m8_uncovered_family_opportunities():
+    db = FakeDB()
+    db.commander_tags["black-cmd"] += ("tutor-card",)
+    db.tags["tutor-card"] = {"black-cmd"}
+
+    report = build_report(db, FakePolicy())
+    families = {
+        row["family"]: row
+        for row in report["families"]
+    }
+
+    assert (
+        report["summary"]["commanders_without_actionable_nonland_synergy"]
+        == 1
+    )
+    assert (
+        families["tutor-*"]["uncovered_commanders_with_unsupported_tags"]
+        == 1
+    )
+    assert families["tutor-*"]["actionable_nonland_commanders"] == 0

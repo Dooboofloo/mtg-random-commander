@@ -18,8 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from mtg_random_commander.lands import candidate_pools
 from mtg_random_commander.policy import CardPolicy
-from mtg_random_commander.synergy import parse_synergy_tag
+from mtg_random_commander.synergy import (
+    SKIPPED_SYNERGY_TAGS, parse_synergy_tag, recognizes_synergy_tag,
+)
 
 
 DEFERRED_FAMILIES = frozenset({
@@ -32,7 +35,10 @@ DEFERRED_FAMILIES = frozenset({
 COLUMNS = (
     "tag", "family", "status", "commanders", "actionable_commanders",
     "pool_size", "direct_size", "inferred_size", "descendant_extra",
-    "eligible_pool_size", "example_commanders",
+    "eligible_pool_size", "eligible_inferred_size",
+    "eligible_nonland_pool_size", "eligible_nonland_inferred_size",
+    "eligible_land_pool_size", "actionable_nonland_commanders",
+    "example_commanders",
 )
 
 
@@ -46,7 +52,9 @@ def family_for(slug: str) -> str:
         return "affinity-for-*"
     if slug.endswith("fall") and len(slug) > 4:
         return "*fall"
-    if slug.endswith("-matters"):
+    if slug.startswith("cycle-"):
+        return "other/cycle"
+    if slug != "x-doesn-t-matter" and slug.endswith(("-matters", "-matter")):
         return "*-matters"
 
     for prefix, label in (
@@ -73,35 +81,34 @@ def family_for(slug: str) -> str:
     return "other/" + slug.split("-", 1)[0]
 
 
-def _parser_knows(slug: str) -> bool:
-    return family_for(slug) in {
-        "typal-*", "synergy-*", "affinity-for-*", "*fall"
-    }
-
-
 def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
     """Build a complete inventory of DIRECT tags on eligible commanders.
 
-    'Actionable' means the commander has at least one other color-legal,
-    policy-eligible card in the parser pool. It does not promise a particular
-    land/nonland slot, a functional interaction, or a playable deck.
+    An actionable nonland candidate is policy-eligible, color-legal, and
+    selectable in a nonland slot. This is a structural test, not a strategic
+    judgment about the quality of the match.
     """
     commanders = policy.commander_candidates(db)
     eligible = policy.eligible_cards(db)
+    eligible_lands, eligible_nonlands = candidate_pools(db, eligible)
     cards = {card.oracle_id: card for card in db.resolve(commanders)}
 
     tagged_by_slug: dict[str, set[str]] = defaultdict(set)
     commanders_with_tags: set[str] = set()
+
     for i, cid in enumerate(sorted(commanders), 1):
         for tagging in db.taggings_for(cid):
             tagged_by_slug[tagging.tag_slug].add(cid)
             commanders_with_tags.add(cid)
         if i % 500 == 0:
-            print(f"  Read tags for {i:,}/{len(commanders):,} commanders...",
-                  file=sys.stderr)
+            print(
+                f"  Read tags for {i:,}/{len(commanders):,} commanders...",
+                file=sys.stderr,
+            )
 
-    # There are at most 32 distinct WUBRG identities, so reuse these pools.
+    # Reuse color-identity pools rather than querying for every commander.
     identity_pools: dict[frozenset[str], frozenset[str]] = {}
+
     for card in cards.values():
         identity = card.color_identity
         if identity not in identity_pools:
@@ -112,33 +119,46 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     family_commanders: dict[str, set[str]] = defaultdict(set)
     family_actionable: dict[str, set[str]] = defaultdict(set)
+    family_nonland_actionable: dict[str, set[str]] = defaultdict(set)
+    family_unsupported_owners: dict[str, set[str]] = defaultdict(set)
     status_commanders: dict[str, set[str]] = defaultdict(set)
+
     actionable_any: set[str] = set()
+    actionable_nonland_any: set[str] = set()
     recognized_any: set[str] = set()
 
     for i, slug in enumerate(sorted(tagged_by_slug), 1):
         if i % 100 == 0:
-            print(f"  Classified {i:,}/{len(tagged_by_slug):,} tags...",
-                  file=sys.stderr)
+            print(
+                f"  Classified {i:,}/{len(tagged_by_slug):,} tags...",
+                file=sys.stderr,
+            )
+
         family = family_for(slug)
         owners = tagged_by_slug[slug]
         family_commanders[family].update(owners)
+
         actionable: set[str] = set()
+        nonland_actionable: set[str] = set()
+
         direct_size: int | None = None
         inferred_size: int | None = None
         descendant_extra: int | None = None
         eligible_pool_size: int | None = None
+        eligible_inferred_size: int | None = None
+        eligible_nonland_pool_size: int | None = None
+        eligible_nonland_inferred_size: int | None = None
+        eligible_land_pool_size: int | None = None
         pool_size = 0
 
-        if slug == "typal-coupling":
-            # Intentional exclusion in the production parser.
+        if slug in SKIPPED_SYNERGY_TAGS:
             status = "skipped"
         else:
-            # Call the production parser for every slug. Newly implemented
-            # families will become visible without editing this audit.
             parsed = parse_synergy_tag(db, slug)
-            if parsed is None and not _parser_knows(slug):
+
+            if not recognizes_synergy_tag(slug):
                 status = "unsupported"
+                family_unsupported_owners[family].update(owners)
             else:
                 direct = db.by_tag(slug, include_descendants=False)
                 direct_size = len(direct)
@@ -152,21 +172,51 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
                 else:
                     pool = parsed.pool
                     pool_size = len(pool)
-                    inferred_size = len(pool - direct)
+
+                    inferred = pool - direct
+                    inferred_size = len(inferred)
+
                     eligible_pool = pool & eligible
                     eligible_pool_size = len(eligible_pool)
-                    status = "expanded" if inferred_size else "direct-only"
+                    eligible_inferred_size = len(inferred & eligible)
+
+                    eligible_nonland_pool_size = len(
+                        pool & eligible_nonlands
+                    )
+                    eligible_nonland_inferred_size = len(
+                        inferred & eligible_nonlands
+                    )
+                    eligible_land_pool_size = len(
+                        pool & eligible_lands
+                    )
+
+                    if not inferred_size:
+                        status = "direct-only"
+                    elif eligible_nonland_inferred_size:
+                        status = "expanded"
+                    else:
+                        status = "expanded-unusable"
 
                     for cid in owners:
-                        # Exclude the commander itself; card count is not inferred
-                        # from the total pool because color identity matters.
-                        choices = eligible_pool & identity_pools[cards[cid].color_identity]
-                        if choices - {cid}:
+                        color_pool = identity_pools[
+                            cards[cid].color_identity
+                        ]
+
+                        # Exclude the commander itself from either pool.
+                        if (eligible_pool & color_pool) - {cid}:
                             actionable.add(cid)
+
+                        if (
+                            pool & eligible_nonlands & color_pool
+                        ) - {cid}:
+                            nonland_actionable.add(cid)
 
         status_commanders[status].update(owners)
         family_actionable[family].update(actionable)
+        family_nonland_actionable[family].update(nonland_actionable)
+
         actionable_any.update(actionable)
+        actionable_nonland_any.update(nonland_actionable)
 
         rows.append({
             "tag": slug,
@@ -174,19 +224,35 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
             "status": status,
             "commanders": len(owners),
             "actionable_commanders": len(actionable),
+            "actionable_nonland_commanders": len(nonland_actionable),
             "pool_size": pool_size,
             "direct_size": direct_size,
             "inferred_size": inferred_size,
             "descendant_extra": descendant_extra,
             "eligible_pool_size": eligible_pool_size,
-            "example_commanders": [cards[cid].name for cid in sorted(
-                owners, key=lambda ident: (cards[ident].name.casefold(), ident)
-            )[:3]],
+            "eligible_inferred_size": eligible_inferred_size,
+            "eligible_nonland_pool_size": eligible_nonland_pool_size,
+            "eligible_nonland_inferred_size": eligible_nonland_inferred_size,
+            "eligible_land_pool_size": eligible_land_pool_size,
+            "example_commanders": [
+                cards[cid].name
+                for cid in sorted(
+                    owners,
+                    key=lambda ident: (
+                        cards[ident].name.casefold(), ident
+                    ),
+                )[:3]
+            ],
         })
 
     family_statuses: dict[str, Counter[str]] = defaultdict(Counter)
+
     for row in rows:
         family_statuses[row["family"]][row["status"]] += 1
+
+    # Upper-bound opportunities, not promises of new synergies:
+    # unsupported tags on uncovered commanders deserve investigation.
+    uncovered = set(commanders) - actionable_nonland_any
 
     families = [
         {
@@ -194,11 +260,22 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
             "tags": sum(family_statuses[family].values()),
             "commanders": len(family_commanders[family]),
             "actionable_commanders": len(family_actionable[family]),
+            "actionable_nonland_commanders": len(
+                family_nonland_actionable[family]
+            ),
+            "uncovered_commanders_with_unsupported_tags": len(
+                family_unsupported_owners[family] & uncovered
+            ),
             "statuses": dict(sorted(family_statuses[family].items())),
         }
         for family in family_commanders
     ]
-    families.sort(key=lambda row: (-row["commanders"], -row["tags"], row["family"]))
+
+    families.sort(
+        key=lambda row: (
+            -row["commanders"], -row["tags"], row["family"]
+        )
+    )
 
     info = db.info()
     source_info = [
@@ -222,16 +299,25 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
             "distinct_direct_tags": len(rows),
             "commanders_with_recognized_tags": len(recognized_any),
             "commanders_with_actionable_synergy": len(actionable_any),
+            "commanders_with_actionable_nonland_synergy": len(
+                actionable_nonland_any
+            ),
+            "commanders_without_actionable_nonland_synergy": len(
+                uncovered
+            ),
             "tag_statuses": dict(sorted(Counter(
                 row["status"] for row in rows
             ).items())),
             "commander_status_counts": {
-                status: len(owners) for status, owners
-                in sorted(status_commanders.items())
+                status: len(owners)
+                for status, owners in sorted(status_commanders.items())
             },
         },
         "families": families,
-        "tags": sorted(rows, key=lambda row: (-row["commanders"], row["tag"])),
+        "tags": sorted(
+            rows,
+            key=lambda row: (-row["commanders"], row["tag"]),
+        ),
     }
 
 
@@ -284,12 +370,36 @@ def print_summary(report: dict[str, Any], top: int) -> None:
     print(f"Distinct commander tag slugs: {summary['distinct_direct_tags']:,}")
     print(f"Commanders with recognized tags: {summary['commanders_with_recognized_tags']:,}")
     print(f"Commanders with actionable pools: {summary['commanders_with_actionable_synergy']:,}")
+    print(
+        "Commanders with nonland synergy: "
+        f"{summary['commanders_with_actionable_nonland_synergy']:,}"
+    )
+    print(
+        "Without nonland synergy: "
+        f"{summary['commanders_without_actionable_nonland_synergy']:,}"
+    )
     print("Tag statuses: " + ", ".join(
         f"{status}={count}" for status, count in summary["tag_statuses"].items()
     ))
     print("\nLargest families (unique affected commanders):")
     for row in report["families"][:top]:
         print(f"  {row['family']:<26} {row['commanders']:>5} commanders; {row['tags']:>4} tags")
+    print("\nLargest uncovered opportunities (unsupported family tags):")
+    gaps = sorted(
+        report["families"],
+        key=lambda row: (
+            -row["uncovered_commanders_with_unsupported_tags"],
+            row["family"],
+        ),
+    )
+    for row in gaps[:top]:
+        if row["uncovered_commanders_with_unsupported_tags"]:
+            print(
+                f"  {row['family']:<26} "
+                f"{row['uncovered_commanders_with_unsupported_tags']:>5} "
+                "uncovered commanders"
+            )
+
     print("\nDeferred families to investigate:")
     for row in (f for f in report["families"] if f["family"] in DEFERRED_FAMILIES):
         print(f"  {row['family']:<26} {row['commanders']:>5} commanders; {row['tags']:>4} tags")
