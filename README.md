@@ -37,8 +37,11 @@ python main.py --nonbasic-fraction 0.6
 python main.py --snow-chance 0
 python main.py --no-packages --synergy-percent 0
 python main.py --update-db
+python scripts/audit_synergy.py --compare scripts/legacy_commander_tags.txt
 python main.py --database path/to/custom.sqlite
 ```
+
+The read-only synergy coverage audit reports Oracle Tag parser support across eligible commanders. It writes detailed JSON and CSV reports to `out/`. The optional `--compare` argument compares the current tag inventory against a historical one-slug-per-line list.
 
 Functional packages are enabled by default: ramp (7–12), interaction (7–12),
 and card draw (5–9). The `--package` option overrides individual count ranges;
