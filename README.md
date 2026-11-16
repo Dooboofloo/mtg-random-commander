@@ -4,7 +4,7 @@ A randomized Magic: The Gathering Commander deck generator powered by [MTG CardD
 
 Generate complete, legal 100-card Commander decks with randomized functional packages, commander-specific synergies, and mana bases. The goal is variety and interesting combinations, not competitively optimized decklists.
 
-**Status:** CardDB rewrite complete; final release verification in progress.
+**Status:** CardDB rewrite complete
 
 ## Getting started
 
