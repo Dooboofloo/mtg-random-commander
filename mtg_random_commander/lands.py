@@ -298,60 +298,67 @@ def build_mana_base(
     if not basic_slots:
         return
 
-    snowy = bool(colors) and (
+    # Snow-themed commanders force snow basics. Otherwise each
+    # individual basic, including Wastes, gets its own snow roll.
+    force_snow = (
         "Snow" in commander.supertypes
         or any(
             "snow" in tagging.tag_slug
-            for tagging in db.taggings_for(
-                deck.commanders[0]
-            )
+            for tagging in db.taggings_for(deck.commanders[0])
         )
-        or rng.random() < snow_chance
     )
 
-    if not colors:
-        deck.add(
-            _basic_id(db, legal, "Wastes"),
-            slot="land",
-            role="basic-land",
-            quantity=basic_slots,
-        )
-        return
-
-    demand = mana_demand(db, deck)
-
-    # Guarantee one of each appropriate basic type when possible.
     counts: Counter[str] = Counter()
 
-    for color in colors[:basic_slots]:
-        counts[color] += 1
+    if colors:
+        demand = mana_demand(db, deck)
 
-    remaining = basic_slots - sum(counts.values())
+        # Guarantee one of each appropriate basic type when possible.
+        for color in colors[:basic_slots]:
+            counts[color] += 1
 
-    if remaining:
-        weights = [
-            max(demand[color], 0.25)
-            for color in colors
-        ]
+        remaining = basic_slots - sum(counts.values())
 
-        counts.update(
-            rng.choices(
-                colors,
-                weights=weights,
-                k=remaining,
+        if remaining:
+            weights = [
+                max(demand[color], 0.25)
+                for color in colors
+            ]
+            counts.update(
+                rng.choices(
+                    colors,
+                    weights=weights,
+                    k=remaining,
+                )
+            )
+    else:
+        counts["C"] = basic_slots
+
+    for color, count in counts.items():
+        basic_name = BASICS.get(color, "Wastes")
+
+        snow_count = (
+            count
+            if force_snow
+            else sum(
+                rng.random() < snow_chance
+                for _ in range(count)
             )
         )
+        normal_count = count - snow_count
 
-    for color in colors:
-        if counts[color]:
-            name = (
-                ("Snow-Covered " if snowy else "")
-                + BASICS[color]
-            )
-
+        if normal_count:
             deck.add(
-                _basic_id(db, legal, name),
+                _basic_id(db, legal, basic_name),
                 slot="land",
                 role="basic-land",
-                quantity=counts[color],
+                quantity=normal_count,
+            )
+
+        if snow_count:
+            deck.add(
+                _basic_id(db, legal, "Snow-Covered " + basic_name),
+                slot="land",
+                role="basic-land",
+                quantity=snow_count,
             )

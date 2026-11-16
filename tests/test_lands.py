@@ -55,15 +55,14 @@ class FakeDB:
                 subtypes={name},
             )
 
-            if name != "Wastes":
-                self.add(
-                    "snow-" + name.lower(),
-                    "Snow-Covered " + name,
-                    "",
-                    [Face(frozenset({"Land"}))],
-                    supertypes={"Basic", "Snow"},
-                    subtypes={name},
-                )
+            self.add(
+                "snow-" + name.lower(),
+                "Snow-Covered " + name,
+                "",
+                [Face(frozenset({"Land"}))],
+                supertypes={"Basic", "Snow"},
+                subtypes={name},
+            )
 
         for i in range(80):
             self.add(
@@ -320,9 +319,8 @@ def test_fetchland_requires_existing_target():
         assert deck.land_count == 12
 
 
-def test_colorless_commander_gets_wastes():
+def test_colorless_commander_gets_snow_wastes_at_full_chance():
     db = FakeDB()
-
     db.cards["cmd"] = replace(
         db.cards["cmd"],
         color_identity=frozenset(),
@@ -338,7 +336,7 @@ def test_colorless_commander_gets_wastes():
         snow_chance=1,
     )
 
-    assert deck.quantities() == {"wastes": 34}
+    assert deck.quantities() == {"snow-wastes": 34}
 
 
 def test_snow_commander_forces_snow_basics():
@@ -363,3 +361,106 @@ def test_snow_commander_forces_snow_basics():
         db[cid].name.startswith("Snow-Covered ")
         for cid in deck.quantities()
     )
+
+
+def test_snow_chance_is_independent_per_basic():
+    db = FakeDB()
+    land, _ = candidate_pools(db, frozenset(db.cards))
+
+    def make():
+        deck = Deck(commanders=("cmd",))
+        build_mana_base(
+            db, deck, frozenset(db.cards),
+            land, 30, Random(8),
+            nonbasic_fraction=0,
+            snow_chance=0.5,
+        )
+        return deck
+
+    first = make()
+    second = make()
+
+    snow_count = sum(
+        entry.quantity for entry in first.entries
+        if db[entry.oracle_id].name.startswith("Snow-Covered ")
+    )
+
+    assert first.entries == second.entries
+    assert first.land_count == 30
+    assert 0 < snow_count < 30
+
+    # Each basic type must itself be mixed.
+    # This catches accidental per-color or per-deck rolls.
+    quantities = first.quantities()
+
+    for name in ("swamp", "forest"):
+        assert quantities[name] > 0
+        assert quantities["snow-" + name] > 0
+
+
+def test_zero_snow_chance_produces_no_snow_basics():
+    db = FakeDB()
+    land, _ = candidate_pools(db, frozenset(db.cards))
+    deck = Deck(commanders=("cmd",))
+
+    build_mana_base(
+        db, deck, frozenset(db.cards),
+        land, 30, Random(8),
+        nonbasic_fraction=0,
+        snow_chance=0,
+    )
+
+    assert all(
+        not db[entry.oracle_id].name.startswith("Snow-Covered ")
+        for entry in deck.entries
+    )
+
+
+def test_colorless_wastes_have_independent_snow_rolls():
+    db = FakeDB()
+    db.cards["cmd"] = replace(
+        db.cards["cmd"],
+        color_identity=frozenset(),
+    )
+    land, _ = candidate_pools(db, frozenset(db.cards))
+
+    def make(seed: int, chance: float):
+        deck = Deck(commanders=("cmd",))
+        build_mana_base(
+            db, deck, frozenset(db.cards),
+            land, 34, Random(seed),
+            nonbasic_fraction=0,
+            snow_chance=chance,
+        )
+        return deck
+
+    half = make(8, 0.5)
+
+    assert half.entries == make(8, 0.5).entries
+    assert half.land_count == 34
+    assert half.quantities()["wastes"] > 0
+    assert half.quantities()["snow-wastes"] > 0
+
+    assert make(8, 0).quantities() == {"wastes": 34}
+    assert make(8, 1).quantities() == {"snow-wastes": 34}
+
+
+def test_snow_colorless_commander_forces_snow_wastes():
+    db = FakeDB()
+    db.cards["cmd"] = replace(
+        db.cards["cmd"],
+        color_identity=frozenset(),
+        supertypes=frozenset({"Snow"}),
+    )
+
+    land, _ = candidate_pools(db, frozenset(db.cards))
+    deck = Deck(commanders=("cmd",))
+
+    build_mana_base(
+        db, deck, frozenset(db.cards),
+        land, 30, Random(3),
+        nonbasic_fraction=0,
+        snow_chance=0,
+    )
+
+    assert deck.quantities() == {"snow-wastes": 30}

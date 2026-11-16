@@ -6,6 +6,7 @@ import argparse
 from collections import Counter
 from dataclasses import replace
 from math import isfinite
+import re
 from time import perf_counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -44,39 +45,151 @@ def _land_range(value: str) -> tuple[int, int]:
 
 
 def _configure_packages(
-    overrides: list[str],
+    overrides: list[str] | list[list[str]],
     disabled: bool,
     parser: argparse.ArgumentParser,
 ) -> tuple[DeckPackage, ...]:
+    """Configure packages using TAG=RANGE or TAG RANGE.
+
+    Both forms are equivalent. If any packages are specified, they
+    replace the complete default configuration.
+    """
     if disabled:
         if overrides:
-            parser.error("--no-packages cannot be combined with --package")
+            parser.error(
+                "--no-packages cannot be combined with --package"
+            )
         return ()
 
-    definitions = {package.role: package for package in DEFAULT_PACKAGES}
+    if not overrides:
+        return DEFAULT_PACKAGES
+
+    defaults = {
+        package.role: package
+        for package in DEFAULT_PACKAGES
+    }
+
+    reserved = {
+        "misc",
+        "synergy",
+        "basic-land",
+        "nonbasic-land",
+        "synergy-land",
+    }
+
+    packages: list[DeckPackage] = []
     seen: set[str] = set()
 
-    for option in overrides:
-        role, separator, value = option.partition("=")
-        if not separator or role not in definitions:
+    for raw in overrides:
+        parts = [raw] if isinstance(raw, str) else list(raw)
+
+        if len(parts) == 1:
+            role, separator, value = parts[0].partition("=")
+
+            if not separator:
+                parser.error(
+                    f"Invalid --package {parts[0]!r}; "
+                    "use TAG=RANGE or TAG RANGE"
+                )
+
+        elif len(parts) == 2:
+            role, value = parts
+
+            if "=" in role or "=" in value:
+                parser.error(
+                    f"Invalid --package {parts!r}; "
+                    "use TAG=RANGE or TAG RANGE"
+                )
+
+        else:
             parser.error(
-                f"Invalid --package {option!r}; "
-                "expected ramp, interaction, or draw followed by =N or =MIN-MAX"
+                f"Invalid --package {parts!r}; "
+                "use TAG=RANGE or TAG RANGE"
             )
+
+        if not re.fullmatch(
+            r"[a-z0-9]+(?:-[a-z0-9]+)*",
+            role,
+        ):
+            parser.error(
+                f"Invalid package tag/role {role!r}"
+            )
+
+        if role in reserved:
+            parser.error(
+                f"Package role {role!r} is reserved"
+            )
+
         if role in seen:
-            parser.error(f"Package {role!r} was specified more than once")
+            parser.error(
+                f"Package {role!r} was specified more than once"
+            )
+
         seen.add(role)
 
         try:
             count_range = _land_range(value)
         except argparse.ArgumentTypeError as exc:
-            parser.error(f"Invalid --package {option!r}: {exc}")
+            parser.error(
+                f"Invalid --package {role!r}: {exc}"
+            )
 
-        definitions[role] = replace(
-            definitions[role], count_range=count_range
+        if role in defaults:
+            # Preserve built-in tag definitions, including
+            # interaction = removal + counterspell.
+            packages.append(
+                replace(
+                    defaults[role],
+                    count_range=count_range,
+                )
+            )
+        else:
+            packages.append(
+                DeckPackage(
+                    role=role,
+                    tags=(role,),
+                    count_range=count_range,
+                )
+            )
+
+    return tuple(packages)
+
+
+def _validate_custom_package_tags(
+    db: CardDatabase,
+    options: list[str] | list[list[str]],
+    parser: argparse.ArgumentParser,
+) -> None:
+    """Validate custom Oracle Tags, regardless of CLI syntax."""
+    if not options:
+        return
+
+    known = getattr(db, "tag_slugs", None)
+
+    if known is None:
+        return
+
+    builtin_roles = {
+        package.role
+        for package in DEFAULT_PACKAGES
+    }
+
+    custom_slugs: set[str] = set()
+
+    for raw in options:
+        parts = [raw] if isinstance(raw, str) else list(raw)
+        role = parts[0].partition("=")[0]
+
+        if role not in builtin_roles:
+            custom_slugs.add(role)
+
+    unknown = sorted(custom_slugs - set(known))
+
+    if unknown:
+        parser.error(
+            "Unknown Oracle Tag slug(s): "
+            + ", ".join(unknown)
         )
-
-    return tuple(definitions[package.role] for package in DEFAULT_PACKAGES)
 
 
 def _synergy_percent(value: str) -> float:
@@ -133,15 +246,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--package",
         action="append",
+        nargs="+",
         default=[],
-        metavar="ROLE=N|MIN-MAX",
-        help="Override ramp, interaction, or draw package count; repeatable",
+        metavar="PACKAGE",
+        help=(
+            "Configure a package with TAG=RANGE or TAG RANGE; "
+            "any explicit packages replace all defaults. Repeatable."
+        ),
     )
 
     parser.add_argument(
         "--no-packages",
         action="store_true",
-        help="Use entirely random nonland selections",
+        help=(
+            "Disable functional packages; synergy remains enabled "
+            "unless --synergy-percent is 0"
+        ),
     )
 
     parser.add_argument(
@@ -215,6 +335,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
         with CardDatabase.open(path) as db:
+            _validate_custom_package_tags(
+                db,
+                args.package,
+                parser,
+            )
             commander_candidates = None
 
             if settings.commander_name is None:

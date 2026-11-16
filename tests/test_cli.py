@@ -227,12 +227,23 @@ def test_named_commander_skips_pool_preparation(
 
 def test_cli_package_overrides():
     parser = cli.build_parser()
-    args = parser.parse_args(["--package", "ramp=9-11", "--package", "draw=0"])
-    packages = cli._configure_packages(args.package, args.no_packages, parser)
-    targets = {package.role: package.count_range for package in packages}
-    assert targets == {
+
+    args = parser.parse_args([
+        "--package", "ramp=9-11",
+        "--package", "draw=0",
+    ])
+
+    packages = cli._configure_packages(
+        args.package,
+        args.no_packages,
+        parser,
+    )
+
+    assert {
+        p.role: p.count_range
+        for p in packages
+    } == {
         "ramp": (9, 11),
-        "interaction": (7, 12),
         "draw": (0, 0),
     }
 
@@ -247,10 +258,28 @@ def test_cli_disables_packages_and_rejects_conflicts():
 
 def test_cli_rejects_unknown_package_and_duplicate_override():
     parser = cli.build_parser()
+
+    # Arbitrary tags are syntactically valid; their existence
+    # is checked against CardDB separately.
+    packages = cli._configure_packages(
+        ["foobar=2"],
+        False,
+        parser,
+    )
+
+    assert [
+        (p.role, p.tags, p.count_range)
+        for p in packages
+    ] == [
+        ("foobar", ("foobar",), (2, 2)),
+    ]
+
     with pytest.raises(SystemExit):
-        cli._configure_packages(["foobar=2"], False, parser)
-    with pytest.raises(SystemExit):
-        cli._configure_packages(["ramp=2", "ramp=3"], False, parser)
+        cli._configure_packages(
+            ["ramp=2", "ramp=3"],
+            False,
+            parser,
+        )
 
 def test_synergy_cli_fraction_validation():
     assert cli._synergy_percent("0") == 0
@@ -288,3 +317,199 @@ def test_cli_land_settings():
     for option in ("--nonbasic-fraction", "--snow-chance"):
         with pytest.raises(SystemExit):
             parser.parse_args([option, "1.5"])
+
+
+def test_m10_custom_packages_replace_defaults():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--package", "ramp", "8-12",
+        "--package", "removal", "8",
+        "--package", "lifegain", "5-7",
+    ])
+
+    packages = cli._configure_packages(
+        args.package,
+        args.no_packages,
+        parser,
+    )
+
+    assert [
+        (p.role, p.tags, p.count_range)
+        for p in packages
+    ] == [
+        ("ramp", ("ramp",), (8, 12)),
+        ("removal", ("removal",), (8, 8)),
+        ("lifegain", ("lifegain",), (5, 7)),
+    ]
+
+
+def test_m10_builtin_overrides_still_work():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--package", "ramp=10",
+        "--package", "draw=6-8",
+    ])
+
+    packages = cli._configure_packages(
+        args.package,
+        args.no_packages,
+        parser,
+    )
+
+    assert {
+        p.role: p.count_range
+        for p in packages
+    } == {
+        "ramp": (10, 10),
+        "draw": (6, 8),
+    }
+
+
+def test_m10_accepts_mixed_package_syntax():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--package", "ramp=10",
+        "--package", "removal", "8",
+        "--package", "interaction=7",
+    ])
+
+    packages = cli._configure_packages(
+        args.package,
+        args.no_packages,
+        parser,
+    )
+
+    assert [
+        (p.role, p.tags, p.count_range)
+        for p in packages
+    ] == [
+        ("ramp", ("ramp",), (10, 10)),
+        ("removal", ("removal",), (8, 8)),
+        ("interaction", ("removal", "counterspell"), (7, 7)),
+    ]
+
+
+def test_m10_rejects_duplicate_custom_packages():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--package", "lifegain", "8",
+        "--package", "lifegain", "6",
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        cli._configure_packages(
+            args.package,
+            args.no_packages,
+            parser,
+        )
+
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--package", "misc", "5"],
+        ["--package", "synergy-land", "5"],
+        ["--package", "Unknown_Tag", "5"],
+        ["--package", "removal", "10-5"],
+        ["--package", "removal", "100"],
+    ],
+)
+def test_m10_rejects_invalid_custom_packages(options):
+    parser = cli.build_parser()
+    args = parser.parse_args(options)
+
+    with pytest.raises(SystemExit) as exc:
+        cli._configure_packages(
+            args.package,
+            args.no_packages,
+            parser,
+        )
+
+    assert exc.value.code == 2
+
+
+def test_m10_custom_package_tag_validation():
+    parser = cli.build_parser()
+    db = SimpleNamespace(
+        tag_slugs=frozenset({
+            "ramp",
+            "removal",
+            "lifegain",
+        })
+    )
+
+    cli._validate_custom_package_tags(
+        db,
+        [["lifegain", "8"]],
+        parser,
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli._validate_custom_package_tags(
+            db,
+            [["not-an-oracle-tag", "8"]],
+            parser,
+        )
+
+    assert exc.value.code == 2
+
+
+def test_m10_no_packages_conflicts_with_custom():
+    parser = cli.build_parser()
+
+    args = parser.parse_args([
+        "--no-packages",
+        "--package", "lifegain", "8",
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        cli._configure_packages(
+            args.package,
+            args.no_packages,
+            parser,
+        )
+
+    assert exc.value.code == 2
+
+
+def test_m10_package_syntax_is_equivalent():
+    parser = cli.build_parser()
+
+    equals = parser.parse_args([
+        "--package", "lifegain=8",
+        "--package", "interaction=7-9",
+    ])
+
+    spaced = parser.parse_args([
+        "--package", "lifegain", "8",
+        "--package", "interaction", "7-9",
+    ])
+
+    assert cli._configure_packages(
+        equals.package,
+        False,
+        parser,
+    ) == cli._configure_packages(
+        spaced.package,
+        False,
+        parser,
+    )
+
+    # Duplicate detection also works across syntax forms.
+    mixed = parser.parse_args([
+        "--package", "ramp=8",
+        "--package", "ramp", "10",
+    ])
+
+    with pytest.raises(SystemExit):
+        cli._configure_packages(
+            mixed.package,
+            False,
+            parser,
+        )

@@ -29,8 +29,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from mtg_random_commander.builder import build_deck
+from mtg_random_commander.cli import (
+    _configure_packages,
+    _validate_custom_package_tags,
+)
 from mtg_random_commander.export import export_lines
-from mtg_random_commander.models import DEFAULT_PACKAGES, DeckSettings
+from mtg_random_commander.models import DeckSettings
 from mtg_random_commander.policy import (
     CardPolicy,
     DEFAULT_HOUSE_BANS,
@@ -88,6 +92,144 @@ def _legal_in_commander(db: Any, cid: str, include_banned: bool) -> bool:
         entry.format == "commander" and entry.status in permitted
         for entry in db.legalities_for(cid)
     )
+
+
+
+def land_composition(
+    db: Any,
+    deck: Any,
+) -> tuple[int, int, int]:
+    """Return basic, snow-covered basic, and nonbasic land counts.
+
+    Classify directly from card data rather than deck role labels.
+    """
+    basics = 0
+    snow_basics = 0
+    nonbasics = 0
+
+    for entry in deck.entries:
+        if entry.slot != "land":
+            continue
+
+        card = db[entry.oracle_id]
+
+        if _is_basic_land(card):
+            basics += entry.quantity
+
+            if card.name.startswith("Snow-Covered "):
+                snow_basics += entry.quantity
+        else:
+            nonbasics += entry.quantity
+
+    return basics, snow_basics, nonbasics
+
+
+def check_configuration(
+    db: Any,
+    deck: Any,
+    plan: Any,
+    settings: DeckSettings,
+) -> list[Issue]:
+    """Independently verify requested generation settings."""
+    issues: list[Issue] = []
+
+    def problem(code: str, detail: str) -> None:
+        issues.append(Issue(code, detail))
+
+    low, high = settings.land_range
+
+    if not low <= plan.land_slots <= high:
+        problem(
+            "land-range",
+            f"Planned {plan.land_slots} lands; "
+            f"requested {low}-{high}",
+        )
+
+    planned = {
+        allocation.role: allocation.target
+        for allocation in plan.allocations
+    }
+    configured = {
+        package.role: package.count_range
+        for package in settings.packages
+    }
+
+    if planned.keys() != configured.keys():
+        problem(
+            "package-plan",
+            f"Planned roles {sorted(planned)}, "
+            f"configured {sorted(configured)}",
+        )
+
+    for role, target in planned.items():
+        if role not in configured:
+            continue
+
+        lower, upper = configured[role]
+
+        if not lower <= target <= upper:
+            problem(
+                "package-plan",
+                f"{role}: planned {target}, "
+                f"allowed {lower}-{upper}",
+            )
+
+    remaining = (
+        plan.nonland_slots
+        - sum(planned.values())
+    )
+    expected_synergy = int(
+        remaining * settings.synergy_percent
+    )
+
+    if plan.synergy_slots != expected_synergy:
+        problem(
+            "synergy-plan",
+            f"Planned {plan.synergy_slots}; "
+            f"expected {expected_synergy}",
+        )
+
+    basics, snow_basics, nonbasics = land_composition(
+        db, deck
+    )
+
+    # Nonbasic role labels must not hide actual basic lands.
+    for entry in deck.entries:
+        if (
+            entry.slot == "land"
+            and entry.role in {
+                "nonbasic-land",
+                "synergy-land",
+            }
+            and _is_basic_land(db[entry.oracle_id])
+        ):
+            problem(
+                "basic-as-nonbasic",
+                db[entry.oracle_id].name,
+            )
+
+    if settings.nonbasic_fraction is not None:
+        target = round(
+            plan.land_slots * settings.nonbasic_fraction
+        )
+
+        if nonbasics > target:
+            problem(
+                "nonbasic-target",
+                f"Used {nonbasics} nonbasics; "
+                f"configured target {target}",
+            )
+
+    # Colored decks with forced snow must use snow-covered
+    # basics. Colorless decks currently use ordinary Wastes.
+    if settings.snow_chance == 1 and snow_basics != basics:
+        problem(
+            "snow-target",
+            f"{snow_basics}/{basics} basics are "
+            "snow-covered with --snow-chance 1",
+        )
+
+    return issues
 
 
 def check_deck(
@@ -306,9 +448,14 @@ def write_reports(report: dict[str, Any], json_path: Path, csv_path: Path) -> No
         encoding="utf-8",
     )
     fields = (
-        "index", "commander", "commander_id", "seed", "colors", "status",
-        "land_count", "nonland_count", "synergy_count", "synergy_target",
-        "elapsed_seconds", "replayed", "digest", "issue_codes",
+        "index", "commander", "commander_id", "seed",
+        "colors", "status",
+        "land_count", "nonland_count",
+        "basic_count", "snow_basic_count",
+        "nonbasic_count", "nonbasic_target",
+        "synergy_count", "synergy_target",
+        "elapsed_seconds", "replayed", "digest",
+        "issue_codes",
     )
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -371,6 +518,8 @@ def run_audit(
         issues: list[Issue] = []
         digest = ""
         land_count = nonland_count = synergy_count = synergy_target = 0
+        basic_count = snow_basic_count = nonbasic_count = 0
+        nonbasic_target = None
         replayed = False
         try:
             deck, plan = build_deck(db, trial_settings, rng=Random(run_seed))
@@ -379,6 +528,23 @@ def run_audit(
             nonland_count = sum(e.quantity for e in deck.entries if e.slot == "nonland")
             synergy_count = sum(e.quantity for e in deck.entries if e.role == "synergy")
             synergy_target = plan.synergy_slots
+            (
+                basic_count,
+                snow_basic_count,
+                nonbasic_count,
+            ) = land_composition(db, deck)
+
+            if settings.nonbasic_fraction is not None:
+                nonbasic_target = round(
+                    plan.land_slots
+                    * settings.nonbasic_fraction
+                )
+
+            issues.extend(
+                check_configuration(
+                    db, deck, plan, settings
+                )
+            )
             if deck.commanders != (cid,):
                 issues.append(Issue("commander-mismatch", f"Expected {cid}; generated {deck.commanders}"))
             issues.extend(check_deck(
@@ -406,6 +572,10 @@ def run_audit(
             "status": "FAIL" if issues else "PASS",
             "land_count": land_count,
             "nonland_count": nonland_count,
+            "basic_count": basic_count,
+            "snow_basic_count": snow_basic_count,
+            "nonbasic_count": nonbasic_count,
+            "nonbasic_target": nonbasic_target,
             "synergy_count": synergy_count,
             "synergy_target": synergy_target,
             "elapsed_seconds": round(perf_counter() - trial_start, 3),
@@ -445,6 +615,15 @@ def run_audit(
             "passing_decks": len(rows) - len(failing),
             "failing_decks": len(failing),
             "replayed_decks": sum(row["replayed"] for row in rows),
+            "total_basics": sum(
+                row["basic_count"] for row in rows
+            ),
+            "total_snow_basics": sum(
+                row["snow_basic_count"] for row in rows
+            ),
+            "total_nonbasics": sum(
+                row["nonbasic_count"] for row in rows
+            ),
             "issue_counts": dict(sorted(codes.items())),
             "color_count_distribution": dict(sorted(Counter(
                 str(len(row["colors"])) for row in rows
@@ -477,6 +656,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--database", type=Path)
     parser.add_argument("--include-banned", action="store_true")
     parser.add_argument("--lands", type=_land_range, default=(34, 40))
+    parser.add_argument(
+        "--package",
+        action="append",
+        nargs="+",
+        default=[],
+        metavar="PACKAGE",
+        help=(
+            "Configure a package with TAG=RANGE or TAG RANGE; "
+            "any explicit packages replace all defaults. Repeatable."
+        ),
+    )
     parser.add_argument("--no-packages", action="store_true")
     parser.add_argument("--synergy-percent", type=float, default=0.4)
     parser.add_argument("--nonbasic-fraction", type=float)
@@ -498,7 +688,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = DeckSettings(
             land_range=args.lands,
-            packages=() if args.no_packages else DEFAULT_PACKAGES,
+            packages=_configure_packages(
+                args.package,
+                args.no_packages,
+                parser,
+            ),
             synergy_percent=args.synergy_percent,
             include_banned=args.include_banned,
             nonbasic_fraction=args.nonbasic_fraction,
@@ -506,6 +700,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Opening CardDB read-only: {database}", flush=True)
         with CardDatabase.open(database) as db:
+            _validate_custom_package_tags(
+                db,
+                args.package,
+                parser,
+            )
             report = run_audit(
                 db,
                 count=args.count,

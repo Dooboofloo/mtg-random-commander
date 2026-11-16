@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from mtg_random_commander.models import Deck, DeckPlan, PackageAllocation
+from mtg_random_commander.models import (
+    Deck,
+    DeckPackage,
+    DeckPlan,
+    DeckSettings,
+    PackageAllocation,
+)
 from scripts.audit_integration import (
     _can_command,
     _fits_slot,
@@ -14,6 +20,8 @@ from scripts.audit_integration import (
     deck_digest,
     select_random_commanders,
     write_reports,
+    check_configuration,
+    land_composition,
 )
 
 
@@ -194,10 +202,180 @@ def test_runner_records_replays_without_using_production_validator(monkeypatch):
     monkeypatch.setattr(audit, "build_deck", fake_build)
 
     report = audit.run_audit(
-        RunnerDB(), count=2, seed=42, replay_count=2, progress_every=1
+        RunnerDB(),
+        count=2,
+        seed=42,
+        replay_count=2,
+        progress_every=1,
+        settings=DeckSettings(
+            land_range=(98, 98),
+            packages=(),
+            synergy_percent=0,
+        ),
     )
     assert report["summary"]["failing_decks"] == 0
     assert report["summary"]["replayed_decks"] == 2
     assert len(calls) == 4
     assert calls[0] == calls[1]
     assert calls[2] == calls[3]
+
+
+def test_m10_audit_detects_snow_preference_violation():
+    db = FakeDB()
+
+    db.cards["snow"] = card(
+        "snow",
+        "Snow-Covered Plains",
+        {"Land"},
+        supertypes={"Basic", "Snow"},
+    )
+
+    deck, plan = make_deck(db)
+
+    settings = DeckSettings(
+        land_range=(98, 98),
+        packages=(),
+        synergy_percent=0,
+        nonbasic_fraction=0,
+        snow_chance=1,
+    )
+
+    assert "snow-target" in codes(
+        check_configuration(
+            db, deck, plan, settings
+        )
+    )
+
+    snow_deck = Deck(commanders=("cmd",))
+    snow_deck.add(
+        "spell",
+        slot="nonland",
+        role="misc",
+    )
+    snow_deck.add(
+        "snow",
+        slot="land",
+        role="basic-land",
+        quantity=98,
+    )
+
+    assert land_composition(
+        db, snow_deck
+    ) == (98, 98, 0)
+
+    assert check_configuration(
+        db, snow_deck, plan, settings
+    ) == []
+
+
+def test_m10_audit_detects_nonbasic_fraction_violation():
+    db = FakeDB()
+
+    db.cards["nonbasic"] = card(
+        "nonbasic",
+        "Utility Land",
+        {"Land"},
+    )
+
+    deck = Deck(commanders=("cmd",))
+    deck.add(
+        "spell",
+        slot="nonland",
+        role="misc",
+    )
+    deck.add(
+        "basic",
+        slot="land",
+        role="basic-land",
+        quantity=97,
+    )
+    deck.add(
+        "nonbasic",
+        slot="land",
+        role="nonbasic-land",
+    )
+
+    plan = DeckPlan(land_slots=98)
+
+    settings = DeckSettings(
+        land_range=(98, 98),
+        packages=(),
+        synergy_percent=0,
+        nonbasic_fraction=0,
+        snow_chance=0,
+    )
+
+    assert land_composition(
+        db, deck
+    ) == (97, 0, 1)
+
+    assert "nonbasic-target" in codes(
+        check_configuration(
+            db, deck, plan, settings
+        )
+    )
+
+
+def test_m10_audit_detects_bad_package_plan():
+    db = FakeDB()
+    deck, _ = make_deck(db)
+
+    settings = DeckSettings(
+        land_range=(34, 40),
+        packages=(
+            DeckPackage(
+                "draw",
+                ("draw",),
+                (5, 7),
+            ),
+        ),
+        synergy_percent=0.4,
+    )
+
+    plan = DeckPlan(
+        land_slots=37,
+        allocations=(
+            PackageAllocation("draw", 4),
+        ),
+        synergy_slots=23,
+    )
+
+    assert "package-plan" in codes(
+        check_configuration(
+            db, deck, plan, settings
+        )
+    )
+
+
+def test_m10_audit_detects_wrong_land_range():
+    db = FakeDB()
+    deck, plan = make_deck(db)
+
+    settings = DeckSettings(
+        land_range=(34, 40),
+        packages=(),
+        synergy_percent=0,
+    )
+
+    assert "land-range" in codes(
+        check_configuration(
+            db, deck, plan, settings
+        )
+    )
+
+
+def test_m10_audit_detects_wrong_synergy_target():
+    db = FakeDB()
+    deck, plan = make_deck(db)
+
+    settings = DeckSettings(
+        land_range=(98, 98),
+        packages=(),
+        synergy_percent=1,
+    )
+
+    assert "synergy-plan" in codes(
+        check_configuration(
+            db, deck, plan, settings
+        )
+    )
