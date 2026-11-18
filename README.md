@@ -10,7 +10,35 @@ Generate complete, legal 100-card Commander decks with randomized functional pac
 
 Requires **Python 3.11+**.
 
-### Windows
+### Windows standalone executable
+
+Windows x64 users can use the command-line generator without installing Python.
+Download `MTGRandomCommander-windows-x64-*.zip` from
+[GitHub Releases](https://github.com/Dooboofloo/mtg-random-commander/releases)
+and extract the complete `MTGRandomCommander` directory.
+
+Double-click `Run.bat` to generate a deck (the console remains open), or run
+`MTGRandomCommander.exe` directly from PowerShell:
+
+```powershell
+.\MTGRandomCommander.exe --help
+.\MTGRandomCommander.exe --commander "Karlov of the Ghost Council" --seed 42
+.\MTGRandomCommander.exe --count 5
+.\MTGRandomCommander.exe --update-db
+```
+
+Keep the `_internal` folder beside the executable. It contains the bundled
+Python runtime and dependencies. The first run requires internet access to
+initialize a CardDB snapshot in the persistent user-data location; the
+snapshot is not bundled in the ZIP. Later runs reuse it offline, with updates
+only when requested by `--update-db`.
+
+By default, outputs are written to `out/` relative to the working directory.
+`Run.bat` switches to the extracted application directory first. The frozen
+program remains CLI-only, does not require administrative installation, and is
+not code-signed.
+
+### Windows (from source)
 
 Download or clone the repository and run `run.bat`.
 
@@ -322,6 +350,27 @@ python -m pytest -q
 ```
 
 The repository contains two additional auditing tools.
+
+### Building the Windows executable
+
+Use a Windows x64 machine with Python 3.11 installed:
+
+```powershell
+python -m pip install -r requirements-build.txt
+.\scripts\build_windows.ps1 -Version dev
+```
+
+The command creates `dist/MTGRandomCommander/` and
+`dist/MTGRandomCommander-windows-x64-dev.zip`. Keep the entire bundle,
+including `_internal`, together when distributing. The build uses PyInstaller
+in one-folder console mode. The SQLite database is intentionally excluded.
+
+The GitHub Actions workflow builds this ZIP on changes to `main`, version tags,
+and manual runs, and checks that the extracted EXE responds to `--help`.
+Version-tagged builds also attach the ZIP to a GitHub Release.
+
+Before publishing a release, separately test a named deck, random deck, and
+first-time database setup using the extracted ZIP on a real Windows system.
 
 ### Integration audit
 

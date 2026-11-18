@@ -1,0 +1,99 @@
+name: Windows CLI build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          architecture: x64
+
+      - name: Install pinned build dependencies
+        run: python -m pip install -r requirements-build.txt
+
+      - name: Run unit tests
+        run: python -m pytest -q
+
+      - name: Build executable and release ZIP
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME
+          } else {
+            "dev-$env:GITHUB_RUN_NUMBER"
+          }
+          & ./scripts/build_windows.ps1 -Version $version
+
+      - name: Verify the extracted distribution
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -Path dist -Filter 'MTGRandomCommander-windows-x64-*.zip')
+          if ($archives.Count -ne 1) { throw 'Expected exactly one release ZIP.' }
+
+          $extracted = Join-Path $env:RUNNER_TEMP 'mrc-extracted'
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath $extracted
+          $bundle = Join-Path $extracted 'MTGRandomCommander'
+          $exe = Join-Path $bundle 'MTGRandomCommander.exe'
+          foreach ($file in @($exe, (Join-Path $bundle 'Run.bat'), (Join-Path $bundle 'README.txt'))) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Missing release file: $file"
+            }
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $bundle '_internal') -PathType Container)) {
+            throw 'Missing _internal runtime directory.'
+          }
+
+          & $exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen --help smoke test failed.' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/MTGRandomCommander-windows-x64-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-x64
+          path: dist
+
+      - name: Attach Windows ZIP to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archives=(dist/*.zip)
+          if [ "${#archives[@]}" -ne 1 ]; then
+            echo 'Expected exactly one release ZIP' >&2
+            exit 1
+          fi
+          asset_name=$(basename "${archives[0]}")
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -Fxq "$asset_name"; then
+              echo "Asset already exists: $asset_name (not replacing it)."
+            else
+              gh release upload "$GITHUB_REF_NAME" "${archives[0]}"
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" "${archives[0]}" \
+              --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi

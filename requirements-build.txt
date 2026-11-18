@@ -1,0 +1,7 @@
+# Windows CLI distribution build environment.
+-r requirements-dev.txt
+
+# Freeze the CardDB version used to build release binaries.
+mtg-carddb==1.2.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
