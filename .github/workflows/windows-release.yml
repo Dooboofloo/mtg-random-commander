@@ -57,10 +57,14 @@ jobs:
           & $exe --help | Out-Null
           if ($LASTEXITCODE -ne 0) { throw 'Frozen --help smoke test failed.' }
 
+      # GitHub Actions packages uploaded artifacts into a ZIP automatically.
+      # Upload the bundle itself, not the locally created release ZIP.
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
-          path: dist/MTGRandomCommander-windows-x64-*.zip
+          path: |
+            dist/
+            !dist/*.zip
           if-no-files-found: error
 
   release:
@@ -75,25 +79,37 @@ jobs:
           name: windows-x64
           path: dist
 
+      # Actions artifacts contain the already-extracted application directory.
+      # Repackage it once for the downloadable GitHub Release asset.
+      - name: Package Windows release ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/MTGRandomCommander/MTGRandomCommander.exe
+          test -f dist/MTGRandomCommander/Run.bat
+          test -f dist/MTGRandomCommander/README.txt
+          test -d dist/MTGRandomCommander/_internal
+          (
+            cd dist
+            zip -q -r "MTGRandomCommander-windows-x64-${GITHUB_REF_NAME}.zip" MTGRandomCommander
+          )
+          unzip -tqq "dist/MTGRandomCommander-windows-x64-${GITHUB_REF_NAME}.zip"
+
       - name: Attach Windows ZIP to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          archives=(dist/*.zip)
-          if [ "${#archives[@]}" -ne 1 ]; then
-            echo 'Expected exactly one release ZIP' >&2
-            exit 1
-          fi
-          asset_name=$(basename "${archives[0]}")
+          archive="dist/MTGRandomCommander-windows-x64-${GITHUB_REF_NAME}.zip"
+          asset_name=$(basename "$archive")
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -Fxq "$asset_name"; then
               echo "Asset already exists: $asset_name (not replacing it)."
             else
-              gh release upload "$GITHUB_REF_NAME" "${archives[0]}"
+              gh release upload "$GITHUB_REF_NAME" "$archive"
             fi
           else
-            gh release create "$GITHUB_REF_NAME" "${archives[0]}" \
+            gh release create "$GITHUB_REF_NAME" "$archive" \
               --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
           fi

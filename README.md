@@ -365,9 +365,10 @@ The command creates `dist/MTGRandomCommander/` and
 including `_internal`, together when distributing. The build uses PyInstaller
 in one-folder console mode. The SQLite database is intentionally excluded.
 
-The GitHub Actions workflow builds this ZIP on changes to `main`, version tags,
-and manual runs, and checks that the extracted EXE responds to `--help`.
-Version-tagged builds also attach the ZIP to a GitHub Release.
+The GitHub Actions workflow builds and checks this ZIP on changes to `main`,
+version tags, and manual runs. Its `windows-x64` Actions artifact contains the
+application directory directly, avoiding a ZIP inside a ZIP. Version-tagged
+builds also attach a separately packaged ZIP to a GitHub Release.
 
 Before publishing a release, separately test a named deck, random deck, and
 first-time database setup using the extracted ZIP on a real Windows system.
