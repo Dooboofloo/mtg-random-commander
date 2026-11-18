@@ -175,6 +175,9 @@ class FakeDB:
             if name.casefold() == card.name.casefold()
         )
 
+    def suggest_names(self, name, *, limit=5, cutoff=0.6):
+        return ()
+
     def produces_mana(self, color):
         return frozenset(
             cid
@@ -597,3 +600,92 @@ def test_synergy_budget_and_misc_fallback(db, monkeypatch):
     validate_deck(
         db, deck, plan, CardPolicy()
     )
+
+
+def test_typo_suggests_only_eligible_commanders(db, monkeypatch):
+    calls = []
+
+    def suggestions(name, *, limit, cutoff):
+        calls.append((name, limit, cutoff))
+        return ("Spell 000", "Test Commander")
+
+    monkeypatch.setattr(db, "suggest_names", suggestions)
+
+    with pytest.raises(ValueError) as exc:
+        build_deck(
+            db,
+            DeckSettings(commander_name="Tset Commander"),
+        )
+
+    text = str(exc.value)
+    assert "No eligible commander" in text
+    assert "Did you mean one of:" in text
+    assert "  - Test Commander" in text
+    assert "  - Spell 000" not in text
+    assert calls == [("Tset Commander", 50, 0.7)]
+
+
+def test_exact_named_commander_never_invokes_fuzzy(db, monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError(
+            "Fuzzy search should only run on an exact miss"
+        )
+
+    monkeypatch.setattr(db, "suggest_names", unexpected)
+
+    deck, _ = build_deck(
+        db,
+        DeckSettings(
+            commander_name="Test Commander",
+            seed=42,
+        ),
+    )
+
+    assert deck.commanders == ("cmd",)
+
+
+def test_exact_noncommander_does_not_suggest(db, monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError(
+            "A known ineligible card is not a typo"
+        )
+
+    monkeypatch.setattr(db, "suggest_names", unexpected)
+
+    with pytest.raises(ValueError, match="No eligible commander") as exc:
+        build_deck(
+            db,
+            DeckSettings(commander_name="Spell 000"),
+        )
+
+    assert "Did you mean" not in str(exc.value)
+
+
+def test_fuzzy_suggestions_respect_excluded_cards(db, monkeypatch):
+    from mtg_random_commander.builder import (
+        _suggest_eligible_commanders,
+    )
+
+    monkeypatch.setattr(
+        db,
+        "suggest_names",
+        lambda *args, **kwargs: ("Test Commander",),
+    )
+
+    policy = CardPolicy(
+        excluded_cards=frozenset({"cmd"})
+    )
+
+    assert _suggest_eligible_commanders(
+        db, policy, "Tset Commander"
+    ) == ()
+
+
+def test_unknown_commander_with_no_close_match(db):
+    with pytest.raises(ValueError, match="No eligible commander") as exc:
+        build_deck(
+            db,
+            DeckSettings(commander_name="Unknown Name"),
+        )
+
+    assert "Did you mean" not in str(exc.value)

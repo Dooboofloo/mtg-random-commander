@@ -42,7 +42,7 @@ python main.py
 
 Creating and activating a virtual environment before installation is recommended.
 
-The application uses `mtg-carddb>=1.1,<2.0` for card data, Oracle Tags, legality information, and database management.
+The application uses `mtg-carddb>=1.2,<2.0` for card data, Oracle Tags, legality information, and database management.
 
 ## Usage
 
@@ -57,6 +57,27 @@ Select a commander:
 ```sh
 python main.py --commander "Karlov of the Ghost Council"
 ```
+
+Commander names are matched exactly, ignoring capitalization.
+Individual card-face names are also supported.
+
+If the supplied commander name is not found, the generator uses
+CardDB's fuzzy name suggestions to display up to five similar
+eligible commander names.
+
+For example:
+
+```sh
+python main.py --commander "Karlov of the Ghost Counicl"
+```
+
+The generator suggests valid names and exits without creating a deck.
+It never automatically substitutes a suggested commander.
+
+Fuzzy suggestions are available through `mtg-carddb>=1.2`.
+They are intended for misspellings and minor punctuation differences,
+not substring search or autocomplete.
+
 
 Generate multiple decks:
 
@@ -355,7 +376,7 @@ The comparison identifies newly appearing and no-longer-present commander tag sl
 ## Current limitations
 
 - Only single-commander decks are generated. Partner, Choose a Background, and other multiple-commander configurations are not supported.
-- Commander selection requires a matching card or face name; fuzzy suggestions are not implemented.
+- Commander selection requires an exact name; misspellings receive suggestions, but suggested names are never selected automatically.
 - Custom functional packages select nonland cards only.
 - Synergy is based on curated Oracle Tag relationships rather than full strategic interpretation of card text.
 - Decks are intentionally randomized, not optimized for power level, mana curve, or competitive play.

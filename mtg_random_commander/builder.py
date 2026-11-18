@@ -20,6 +20,38 @@ if TYPE_CHECKING:
     from mtg_carddb import CardDatabase
 
 
+def _suggest_eligible_commanders(
+    db: CardDatabase,
+    policy: CardPolicy,
+    name: str,
+    *,
+    limit: int = 5,
+) -> tuple[str, ...]:
+    """Suggest only eligible commanders, including eligible face names.
+
+    CardDB returns ranked card and face names, not Oracle IDs.
+    Verify each candidate with the same policy as exact lookup.
+    """
+    suggestions: list[str] = []
+
+    for candidate in db.suggest_names(
+        name,
+        limit=50,
+        cutoff=0.7,
+    ):
+        if any(
+            can_be_commander(db[cid])
+            and policy.allows_card(db, cid)
+            for cid in db.by_name(candidate)
+        ):
+            suggestions.append(candidate)
+
+            if len(suggestions) == limit:
+                break
+
+    return tuple(suggestions)
+
+
 def _choose_commander(
     db: CardDatabase,
     policy: CardPolicy,
@@ -29,17 +61,37 @@ def _choose_commander(
     candidates: frozenset[str] | None = None,
 ) -> str:
     if name is not None:
+        exact_ids = db.by_name(name)
+
         matches = sorted(
             cid
-            for cid in db.by_name(name)
-            if policy.allows_card(db, cid)
-            and can_be_commander(db[cid])
+            for cid in exact_ids
+            if can_be_commander(db[cid])
+            and policy.allows_card(db, cid)
         )
 
         if not matches:
-            raise ValueError(
-                f"No eligible commander named {name!r}"
-            )
+            message = f"No eligible commander named {name!r}"
+
+            # Only invoke the more expensive fuzzy search if
+            # the name is actually unknown, not merely ineligible.
+            if not exact_ids:
+                suggestions = _suggest_eligible_commanders(
+                    db, policy, name
+                )
+
+                if suggestions:
+                    message += "\nDid you mean one of:\n"
+                    message += "\n".join(
+                        f"  - {item}"
+                        for item in suggestions
+                    )
+                    message += (
+                        "\nRe-run with the correct "
+                        "--commander name."
+                    )
+
+            raise ValueError(message)
 
         if len(matches) != 1:
             choices = ", ".join(
@@ -55,7 +107,9 @@ def _choose_commander(
         candidates = policy.commander_candidates(db)
 
     if not candidates:
-        raise ValueError("No eligible commanders in the database")
+        raise ValueError(
+            "No eligible commanders in the database"
+        )
 
     return rng.choice(sorted(candidates))
 
