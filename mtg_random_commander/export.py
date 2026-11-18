@@ -19,16 +19,14 @@ def export_lines(
 ) -> list[str]:
     quantities = deck.quantities()
 
+    names = {cid: db[cid].name for cid in quantities}
     ordered = sorted(
         quantities,
-        key=lambda cid: (
-            db[cid].name.casefold(),
-            cid,
-        ),
+        key=lambda cid: (names[cid].casefold(), cid),
     )
 
     lines = [
-        f"{quantities[cid]} {db[cid].name}"
+        f"{quantities[cid]} {names[cid]}"
         for cid in ordered
     ]
 

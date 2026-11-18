@@ -8,6 +8,7 @@ unsupported rather than being interpreted speculatively.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from random import Random
 from typing import TYPE_CHECKING
 
@@ -277,20 +278,26 @@ def _singular(value: str) -> str:
     return value
 
 
+@lru_cache(maxsize=16)
+def _canonical_names(catalog: frozenset[str]) -> dict[str, str]:
+    """Small, bounded, database-independent cache of catalog spellings."""
+    names: dict[str, str] = {}
+    for item in sorted(catalog, key=lambda item: (item.casefold(), item)):
+        names.setdefault(item.casefold(), item)
+    return names
+
+
 def _matching_name(catalog: frozenset[str], name: str) -> str | None:
-    normalized = name.casefold()
-    return next((item for item in catalog if item.casefold() == normalized), None)
+    return _canonical_names(catalog).get(name.casefold())
 
 
 def _tag_pool(db: CardDatabase, slugs: tuple[str, ...]) -> set[str]:
     result: set[str] = set()
-    known = getattr(db, "tag_slugs", None)
+    # Optional enabler tags need not occur in every database snapshot.
+    known = db.tag_slugs
     for slug in slugs:
-        # CardDB raises UnknownTagError for unknown slugs. A source snapshot
-        # may not contain every optional enabler in our curated mapping.
-        if known is not None and slug not in known:
-            continue
-        result.update(db.by_tag(slug, include_descendants=False))
+        if slug in known:
+            result.update(db.by_tag(slug, include_descendants=False))
     return result
 
 
@@ -541,12 +548,15 @@ def fill_synergy(
     available: set[str],
     target: int,
     rng: Random,
+    *,
+    packages: tuple[SynergyPackage, ...] | None = None,
 ) -> int:
     """Fill synergy slots with equal weight per commander theme."""
     if target <= 0:
         return 0
 
-    packages = get_synergy_packages(db, commander_id)
+    if packages is None:
+        packages = get_synergy_packages(db, commander_id)
 
     # Keep each theme independent rather than combining their
     # candidate pools. Functional-package cards have already

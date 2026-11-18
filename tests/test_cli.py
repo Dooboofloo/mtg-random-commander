@@ -20,6 +20,11 @@ def mock_commander_candidates(monkeypatch):
     monkeypatch.setattr(
         cli.CardPolicy,
         "commander_candidates",
+        lambda self, db, *, eligible_cards=None: frozenset({"cmd"}),
+    )
+    monkeypatch.setattr(
+        cli.CardPolicy,
+        "eligible_cards",
         lambda self, db: frozenset({"cmd"}),
     )
 
@@ -54,6 +59,7 @@ def test_cli_generates_deck(
         rng,
         on_progress=None,
         commander_candidates=None,
+        eligible_cards=None,
     ):
         builds.append((db, settings, commander_candidates))
         return (
@@ -114,7 +120,7 @@ def test_cli_update_flag_passes_to_database(
 
     monkeypatch.setattr(
         cli, "build_deck",
-        lambda db, settings, *, rng, on_progress=None, commander_candidates=None: (
+        lambda db, settings, *, rng, on_progress=None, commander_candidates=None, eligible_cards=None: (
             SimpleNamespace(commanders=("cmd",), entries=()),
             SimpleNamespace(
                 land_slots=37,
@@ -513,3 +519,50 @@ def test_m10_package_syntax_is_equivalent():
             False,
             parser,
         )
+
+
+def test_batch_generation_reuses_eligible_pool(tmp_path, monkeypatch):
+    db = FakeDatabase()
+
+    class Connection:
+        @staticmethod
+        def open(path):
+            return db
+
+    monkeypatch.setattr(cli, "CardDatabase", Connection)
+    monkeypatch.setattr(cli, "ensure_database", lambda *, path, update: path)
+
+    calls = []
+    shared = frozenset({"cmd", "spell"})
+
+    def eligible(self, database):
+        calls.append(database)
+        return shared
+
+    monkeypatch.setattr(cli.CardPolicy, "eligible_cards", eligible)
+
+    pools = []
+
+    def fake_build(database, settings, **kwargs):
+        pools.append(kwargs["eligible_cards"])
+        return (
+            SimpleNamespace(commanders=("cmd",), entries=()),
+            SimpleNamespace(
+                land_slots=37,
+                nonland_slots=62,
+                allocations=(),
+                synergy_slots=0,
+            ),
+        )
+
+    monkeypatch.setattr(cli, "build_deck", fake_build)
+    monkeypatch.setattr(
+        cli, "save_decklist", lambda database, deck, directory: tmp_path / "deck.txt"
+    )
+
+    assert cli.main([
+        "--count", "3",
+        "--database", str(tmp_path / "carddb.sqlite"),
+    ]) == 0
+    assert len(calls) == 1
+    assert pools == [shared, shared, shared]

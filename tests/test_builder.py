@@ -218,6 +218,13 @@ class FakeDB:
             parents=frozenset(),
         )
 
+    def has_tag(self, cid, slug, *, include_ancestors=True):
+        return False
+
+    @property
+    def tag_slugs(self):
+        return frozenset()
+
 
 @pytest.fixture
 def db():
@@ -622,7 +629,7 @@ def test_typo_suggests_only_eligible_commanders(db, monkeypatch):
     assert "Did you mean one of:" in text
     assert "  - Test Commander" in text
     assert "  - Spell 000" not in text
-    assert calls == [("Tset Commander", 50, 0.7)]
+    assert calls == [("Tset Commander", 50, 0.75)]
 
 
 def test_exact_named_commander_never_invokes_fuzzy(db, monkeypatch):
@@ -689,3 +696,97 @@ def test_unknown_commander_with_no_close_match(db):
         )
 
     assert "Did you mean" not in str(exc.value)
+
+
+def test_eligible_pool_is_computed_once_per_named_deck(db, monkeypatch):
+    original = CardPolicy.eligible_cards
+    calls = []
+
+    def counted(self, database):
+        calls.append(1)
+        return original(self, database)
+
+    monkeypatch.setattr(CardPolicy, "eligible_cards", counted)
+    deck, _ = build_deck(
+        db,
+        DeckSettings(commander_name="Test Commander", seed=42),
+    )
+    assert deck.total_count == 100
+    assert len(calls) == 1
+
+
+def test_reused_eligible_pool_skips_all_bulk_recomputations(db, monkeypatch):
+    eligible = CardPolicy().eligible_cards(db)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Pool should have been shared")
+
+    monkeypatch.setattr(CardPolicy, "eligible_cards", forbidden)
+    deck, _ = build_deck(
+        db,
+        DeckSettings(commander_name="Test Commander", seed=42),
+        eligible_cards=eligible,
+    )
+    assert deck.total_count == 100
+
+
+def test_synergy_packages_are_parsed_once_per_deck(db, monkeypatch):
+    from mtg_random_commander import builder, lands, synergy
+    from mtg_random_commander.synergy import SynergyPackage
+
+    db._add(
+        "utility-land", "Utility Land", "",
+        (Face(frozenset({"Land"})),),
+    )
+    calls = []
+
+    def parsed(database, commander_id):
+        calls.append(commander_id)
+        return (
+            SynergyPackage(
+                "test", "typal", frozenset({"spell-000", "utility-land"})
+            ),
+        )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Packages were reparsed")
+
+    monkeypatch.setattr(builder, "get_synergy_packages", parsed)
+    monkeypatch.setattr(synergy, "get_synergy_packages", forbidden)
+    monkeypatch.setattr(lands, "get_synergy_packages", forbidden)
+
+    deck, _ = build_deck(
+        db,
+        DeckSettings(
+            commander_name="Test Commander",
+            seed=42,
+            nonbasic_fraction=0.25,
+        ),
+    )
+    assert deck.total_count == 100
+    assert calls == ["cmd"]
+
+
+def test_export_card_names_are_resolved_once(db):
+    deck, _ = build_deck(
+        db,
+        DeckSettings(
+            commander_name="Test Commander",
+            seed=42,
+            nonbasic_fraction=0,
+            snow_chance=0,
+        ),
+    )
+
+    class CountingDB:
+        def __init__(self, delegate):
+            self.delegate = delegate
+            self.calls = {}
+
+        def __getitem__(self, cid):
+            self.calls[cid] = self.calls.get(cid, 0) + 1
+            return self.delegate[cid]
+
+    counting = CountingDB(db)
+    assert export_lines(counting, deck)[-1] == "1 Test Commander"
+    assert all(n == 1 for n in counting.calls.values())

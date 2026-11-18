@@ -58,6 +58,9 @@ class FakeDB:
     def by_tag(self, name):
         return self.tags[name]
 
+    def has_tag(self, oracle_id, slug, *, include_ancestors=True):
+        return oracle_id in self.tags[slug]
+
     def by_name(self, name):
         return frozenset()
 
@@ -303,6 +306,16 @@ def test_direct_eligibility_checks_legality_and_tag_ancestors():
                 parents=parents,
             )
 
+        def has_tag(self, cid, slug, *, include_ancestors=True):
+            return any(
+                tagging.tag_slug == slug
+                or (
+                    include_ancestors
+                    and slug in self.get_tag(tagging.tag_slug).parents
+                )
+                for tagging in self.taggings_for(cid)
+            )
+
     db = DirectDB(
         cards,
         legal={"ordinary", "tagged"},
@@ -318,3 +331,30 @@ def test_direct_eligibility_checks_legality_and_tag_ancestors():
     assert CardPolicy(
         include_banned=True
     ).allows_card(db, "banned")
+
+
+def test_has_tag_checks_ancestors_and_uses_single_card_api():
+    """Use CardDB v1.2's direct check rather than tag-tree traversal."""
+    from types import SimpleNamespace
+
+    class CheckingDB(FakeDB):
+        def __init__(self):
+            super().__init__({"x": FakeCard("x", (face(types=("Creature",)),))}, legal={"x"})
+            self.calls = []
+
+        def legalities_for(self, cid):
+            return (SimpleNamespace(format="commander", status="legal"),)
+
+        def has_tag(self, oracle_id, slug, *, include_ancestors=True):
+            self.calls.append((oracle_id, slug, include_ancestors))
+            return slug == "draft-matters"
+
+        def taggings_for(self, cid):
+            raise AssertionError("Do not manually walk taggings")
+
+        def get_tag(self, slug):
+            raise AssertionError("Do not manually resolve ancestors")
+
+    db = CheckingDB()
+    assert not CardPolicy().allows_card(db, "x")
+    assert db.calls == [("x", "draft-matters", True)]

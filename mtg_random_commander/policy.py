@@ -121,47 +121,23 @@ class CardPolicy:
         ):
             return False
 
-        # Resolve configured exclusions to canonical tag slugs.
-        excluded_tags = set()
-
-        for slug in self.excluded_tags:
-            tag = db.get_tag(slug)
-
-            if tag is None:
-                raise ValueError(
-                    f"Unknown excluded Oracle Tag: {slug!r}"
-                )
-
-            excluded_tags.add(tag.slug)
-
-        # CardDB returns direct taggings. Walk parent tags to
-        # reproduce by_tag(..., include_descendants=True).
-        pending = [
-            tagging.tag_slug
-            for tagging in db.taggings_for(oracle_id)
-        ]
-
-        visited = set()
-
-        while pending:
-            slug = pending.pop()
-
-            if slug in visited:
-                continue
-
-            visited.add(slug)
-
-            if slug in excluded_tags:
-                return False
-
-            tag = db.get_tag(slug)
-
-            if tag is not None:
-                pending.extend(tag.parents)
+        # A requested exclusion also excludes cards tagged with a descendant.
+        # CardDB v1.2 handles aliases and the ancestor walk without loading
+        # the global tag index.
+        if any(
+            db.has_tag(oracle_id, slug, include_ancestors=True)
+            for slug in self.excluded_tags
+        ):
+            return False
 
         return True
 
-    def commander_candidates(self, db: CardDatabase) -> frozenset[str]:
+    def commander_candidates(
+        self,
+        db: CardDatabase,
+        *,
+        eligible_cards: frozenset[str] | None = None,
+    ) -> frozenset[str]:
         """Eligible single-commander candidates."""
 
         possible = (
@@ -171,9 +147,10 @@ class CardPolicy:
             | db.by_type("Planeswalker")
         )
 
+        eligible = self.eligible_cards(db) if eligible_cards is None else eligible_cards
         return frozenset(
             card.oracle_id
-            for card in db.resolve(self.eligible_cards(db) & possible)
+            for card in db.resolve(eligible & possible)
             if can_be_commander(card)
         )
 
@@ -181,6 +158,8 @@ class CardPolicy:
         self,
         db: CardDatabase,
         commander_ids: tuple[str, ...],
+        *,
+        eligible_cards: frozenset[str] | None = None,
     ) -> frozenset[str]:
         """
         Eligible cards within the commanders' combined color identity.
@@ -198,9 +177,10 @@ class CardPolicy:
             *(db[cid].color_identity for cid in commander_ids)
         )
 
+        eligible = self.eligible_cards(db) if eligible_cards is None else eligible_cards
         return frozenset(
             (
-                self.eligible_cards(db)
+                eligible
                 & db.within_identity("".join(sorted(colors)))
             )
             - set(commander_ids)

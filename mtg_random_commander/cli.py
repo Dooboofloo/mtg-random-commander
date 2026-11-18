@@ -164,10 +164,7 @@ def _validate_custom_package_tags(
     if not options:
         return
 
-    known = getattr(db, "tag_slugs", None)
-
-    if known is None:
-        return
+    known = db.tag_slugs
 
     builtin_roles = {
         package.role
@@ -340,6 +337,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.package,
                 parser,
             )
+            # Share one bulk eligibility pool for batches and random
+            # commanders. A single named lookup stays lazy until the name
+            # has been resolved by the builder.
+            policy = CardPolicy(
+                include_banned=settings.include_banned,
+                excluded_cards=settings.excluded_cards,
+            )
+            eligible_pool = (
+                policy.eligible_cards(db) if args.count > 1 else None
+            )
             commander_candidates = None
 
             if settings.commander_name is None:
@@ -350,12 +357,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 started = perf_counter()
 
-                policy = CardPolicy(
-                    include_banned=settings.include_banned,
-                    excluded_cards=settings.excluded_cards,
-                )
+                if eligible_pool is None:
+                    eligible_pool = policy.eligible_cards(db)
 
-                commander_candidates = policy.commander_candidates(db)
+                commander_candidates = policy.commander_candidates(
+                    db, eligible_cards=eligible_pool,
+                )
 
                 print(
                     f"Found {len(commander_candidates):,} eligible "
@@ -388,6 +395,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         rng=rng,
                         on_progress=report,
                         commander_candidates=commander_candidates,
+                        eligible_cards=eligible_pool,
                     )
 
                     report("Saving decklist...")

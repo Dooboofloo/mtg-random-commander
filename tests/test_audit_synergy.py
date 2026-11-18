@@ -52,6 +52,10 @@ class FakeDB:
     def taggings_for(self, cid):
         return tuple(SimpleNamespace(tag_slug=tag) for tag in self.commander_tags[cid])
 
+    @property
+    def tag_slugs(self):
+        return frozenset(self.tags)
+
     def by_tag(self, slug, *, include_descendants=True):
         return frozenset(self.tags.get(slug, ()))
 

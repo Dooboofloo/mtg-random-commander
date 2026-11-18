@@ -61,6 +61,10 @@ class FakeDB:
             for tag in self._taggings
         )
 
+    @property
+    def tag_slugs(self):
+        return frozenset(self.tags)
+
     def by_tag(self, slug, *, include_descendants=True):
         return frozenset(self.tags.get(slug, ()))
 
@@ -919,3 +923,15 @@ def test_m8d_resource_packages_remain_independent():
         "fodder-maker",
     }
     assert available == {"unrelated"}
+
+
+def test_catalog_name_cache_is_bounded_and_canonical():
+    from mtg_random_commander.synergy import _canonical_names, _matching_name
+
+    catalog = frozenset({"Time Lord", "Artifact", "Forest"})
+    _canonical_names.cache_clear()
+
+    assert _matching_name(catalog, "time lord") == "Time Lord"
+    assert _matching_name(catalog, "TIME LORD") == "Time Lord"
+    assert _matching_name(catalog, "unknown") is None
+    assert _canonical_names.cache_info().misses == 1

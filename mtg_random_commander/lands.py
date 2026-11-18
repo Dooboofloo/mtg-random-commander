@@ -12,6 +12,7 @@ from .synergy import get_synergy_packages
 
 if TYPE_CHECKING:
     from mtg_carddb import Card, CardDatabase
+    from .synergy import SynergyPackage
 
 
 BASICS = {
@@ -195,6 +196,7 @@ def build_mana_base(
     *,
     nonbasic_fraction: float | None = None,
     snow_chance: float = 0.055,
+    synergy_packages: tuple[SynergyPackage, ...] | None = None,
 ) -> None:
     """Fill land slots with nonbasics and pip-weighted basics."""
     commander = db[deck.commanders[0]]
@@ -221,9 +223,9 @@ def build_mana_base(
     chosen: list[str] = []
 
     if target and candidates:
-        for package in get_synergy_packages(
-            db, deck.commanders[0]
-        ):
+        if synergy_packages is None:
+            synergy_packages = get_synergy_packages(db, deck.commanders[0])
+        for package in synergy_packages:
             synergies.update(package.pool)
 
         fixing = set()

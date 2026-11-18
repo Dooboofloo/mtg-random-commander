@@ -14,7 +14,7 @@ from .lands import build_mana_base, candidate_pools, slot_eligible
 from .models import Deck, DeckPlan, DeckSettings
 from .packages import fill_packages, roll_allocations
 from .policy import CardPolicy, can_be_commander
-from .synergy import fill_synergy
+from .synergy import fill_synergy, get_synergy_packages
 
 if TYPE_CHECKING:
     from mtg_carddb import CardDatabase
@@ -37,7 +37,7 @@ def _suggest_eligible_commanders(
     for candidate in db.suggest_names(
         name,
         limit=50,
-        cutoff=0.7,
+        cutoff=0.75,
     ):
         if any(
             can_be_commander(db[cid])
@@ -119,6 +119,9 @@ def validate_deck(
     deck: Deck,
     plan: DeckPlan,
     policy: CardPolicy,
+    *,
+    eligible_cards: frozenset[str] | None = None,
+    legal_cards: frozenset[str] | None = None,
 ) -> None:
     """Validate a single-commander deck with basic-land duplicates."""
 
@@ -128,9 +131,13 @@ def validate_deck(
         )
 
     commander_id = deck.commanders[0]
+    eligible = (
+        policy.eligible_cards(db)
+        if eligible_cards is None else eligible_cards
+    )
 
     if (
-        commander_id not in policy.eligible_cards(db)
+        commander_id not in eligible
         or not can_be_commander(db[commander_id])
     ):
         raise ValueError("Commander is not eligible")
@@ -149,7 +156,10 @@ def validate_deck(
             "Land/nonland slot counts do not match the plan"
         )
 
-    legal = policy.cards_for_commanders(db, deck.commanders)
+    legal = (
+        policy.cards_for_commanders(db, deck.commanders, eligible_cards=eligible)
+        if legal_cards is None else legal_cards
+    )
     basics = db.by_supertype("Basic") & db.by_type("Land")
 
     for cid, quantity in deck.quantities().items():
@@ -190,6 +200,7 @@ def build_deck(
     rng: Random | None = None,
     on_progress: Callable[[str], None] | None = None,
     commander_candidates: frozenset[str] | None = None,
+    eligible_cards: frozenset[str] | None = None,
 ) -> tuple[Deck, DeckPlan]:
     """Generate a single-commander deck with functional packages and synergy."""
 
@@ -236,9 +247,13 @@ def build_deck(
     if on_progress:
         on_progress("2/6 - Finding eligible cards...")
 
+    # Build the bulk eligibility pool once per generation unless the caller
+    # is reusing it across multiple decks from the same CardDB snapshot.
+    eligible = policy.eligible_cards(db) if eligible_cards is None else eligible_cards
     legal = policy.cards_for_commanders(
         db,
         deck.commanders,
+        eligible_cards=eligible,
     )
 
     if on_progress:
@@ -267,6 +282,16 @@ def build_deck(
     if on_progress:
         on_progress("4/6 - Selecting commander synergies...")
 
+    # The same immutable packages serve nonland and nonbasic-land selection.
+    # Keep the old lazy behavior when neither stage can use synergies.
+    need_synergy = (
+        plan.synergy_slots > 0
+        or (plan.land_slots > 0 and settings.nonbasic_fraction != 0)
+    )
+    synergy_packages = (
+        get_synergy_packages(db, commander_id) if need_synergy else ()
+    )
+
     fill_synergy(
         db,
         deck,
@@ -274,6 +299,7 @@ def build_deck(
         available,
         plan.synergy_slots,
         rng,
+        packages=synergy_packages,
     )
 
     # Unfilled functional and synergy allocations
@@ -299,6 +325,7 @@ def build_deck(
         rng,
         nonbasic_fraction=settings.nonbasic_fraction,
         snow_chance=settings.snow_chance,
+        synergy_packages=synergy_packages,
     )
 
     if on_progress:
@@ -309,6 +336,8 @@ def build_deck(
         deck,
         plan,
         policy,
+        eligible_cards=eligible,
+        legal_cards=legal,
     )
 
     return deck, plan
