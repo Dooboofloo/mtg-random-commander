@@ -218,6 +218,15 @@ Supported relationships include:
 - Payoff-to-enabler relationships, such as lifegain, sacrifice, and card draw
 - Tutor, reanimation, copying, recursion, and cost-reduction targets
 - Graveyard fuel, tap/untap interactions, counters, and selected keyword synergies
+- Attack, cast, death and leave-the-battlefield triggers; trigger doublers and flicker targets
+- Power/toughness, X-cost, mana value, off-turn casting, and other additional `*-matters` tags
+- Selected `repeatable-*`, `gives-*`, and `gains-*` tags linked **directionally** to useful payoffs
+- Explicit Animate and Sneak targets; Descend recognized from commander rules text when Tagger has no corresponding tag
+
+The M12 relationships are defined in `synergy_expansion.py`. They are intentionally
+curated: descriptive tags such as `activated-ability` are not automatically
+converted into synergies. Supporting tags absent from a CardDB snapshot are
+skipped, and a recognized tag with no suitable cards can still produce no package.
 
 Each recognized commander synergy package receives independent selection weight. A very large candidate pool therefore does not automatically overwhelm a smaller commander theme.
 
@@ -331,6 +340,10 @@ To refresh the database:
 python main.py --update-db
 ```
 
+`--update-db` is a standalone maintenance command: it initializes the database
+if missing or refreshes an existing snapshot, then **exits without generating a
+deck**. Failures return a nonzero exit code. Ordinary invocations remain offline.
+
 To use a custom database path:
 
 ```sh
@@ -405,7 +418,7 @@ It reads an existing CardDB snapshot without modifying it.
 
 ### Synergy coverage audit
 
-`scripts/audit_synergy.py` examines direct Oracle Tags on eligible commanders and measures how many have recognized, usable synergy pools.
+`scripts/audit_synergy.py` examines direct Oracle Tags on eligible commanders and measures how many have recognized, usable synergy pools. Run this against the **same CardDB snapshot** before and after an M12 change to compare coverage; `unsupported`, `direct-only`, and `expanded` are different outcomes. Synthetic Descend packages are recognized at deck-generation time and are not counted in this tag-only audit.
 
 Run it with:
 
@@ -449,6 +462,7 @@ The comparison identifies newly appearing and no-longer-present commander tag sl
 - `mtg_random_commander/packages.py` — functional package selection
 - `mtg_random_commander/synergy.py` — commander synergy parsing and selection
 - `mtg_random_commander/synergy_resources.py` — curated resource relationships
+- `mtg_random_commander/synergy_expansion.py` — additional directional and keyword relationships
 - `mtg_random_commander/lands.py` — mana-base construction
 - `mtg_random_commander/export.py` — decklist export
 - `scripts/` — auditing utilities

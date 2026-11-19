@@ -144,6 +144,39 @@ def test_cli_update_flag_passes_to_database(
     assert calls == [True]
 
 
+def test_m12_update_does_not_open_or_generate(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "snapshot.sqlite"
+    called = []
+
+    def refreshed(*, path, update):
+        called.append((path, update))
+        return path
+
+    monkeypatch.setattr(cli, "ensure_database", refreshed)
+    monkeypatch.setattr(
+        cli.CardDatabase, "open", lambda *_: (_ for _ in ()).throw(
+            AssertionError("Update should not open the database")
+        ),
+    )
+    monkeypatch.setattr(
+        cli, "build_deck", lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("Update should not generate a deck")
+        ),
+    )
+    assert cli.main(["--update-db", "--database", str(path)]) == 0
+    assert called == [(path, True)]
+    assert "refreshed" in capsys.readouterr().out
+
+
+def test_m12_update_failure_exits_nonzero(tmp_path, monkeypatch, capsys):
+    def fails(**kwargs):
+        raise OSError("update unavailable")
+
+    monkeypatch.setattr(cli, "ensure_database", fails)
+    assert cli.main(["--update-db"]) == 1
+    assert "Unable to update database: update unavailable" in capsys.readouterr().err
+
+
 def test_help_skips_database(monkeypatch):
     monkeypatch.setattr(
         cli,

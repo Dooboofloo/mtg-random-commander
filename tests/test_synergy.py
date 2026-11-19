@@ -366,11 +366,11 @@ def test_m8_matters_tags_find_enablers():
 def test_m8_unknown_matters_tags_remain_unsupported():
     from mtg_random_commander.synergy import recognizes_synergy_tag
 
+    # Broad/ambiguous descriptors must not become blanket synergy families.
     db = FakeDB()
-
-    assert not recognizes_synergy_tag("mana-value-matters")
-    assert parse_synergy_tag(db, "mana-value-matters") is None
-    assert not recognizes_synergy_tag("repeatable-lifegain")
+    assert not recognizes_synergy_tag("table-order-matters")
+    assert parse_synergy_tag(db, "table-order-matters") is None
+    assert not recognizes_synergy_tag("repeatable-crime")
 
 
 def test_m8_missing_optional_enabler_tags_do_not_raise():
@@ -654,14 +654,14 @@ def test_m8c_ambiguous_target_tags_remain_unsupported():
 
     unsupported = (
         "copy-self",
-        "copy-spell",
+        "copy-nonland",
         "tutor-card",
         "tutor-to-hand",
         "reanimate-from-opponent",
-        "regrowth-any",
+        "reanimate-face-down",
         "impulse-to-top",
-        "cost-reducer-activated-ability",
-        "cost-reducer-noncreature",
+        "impulse-pw-tyvar",
+        "tutor-from-opponent",
     )
 
     for slug in unsupported:
@@ -869,10 +869,10 @@ def test_m8d_ambiguous_resource_tags_remain_unsupported():
     db = FakeDB()
 
     for slug in (
-        "tap-fuel-power",
+        "tap-fuel-unknown",
         "graveyard-fuel-self",
-        "gains-flying",
-        "untapper-nonland",
+        "gains-soulshift",
+        "sneak-self",
     ):
         assert not recognizes_synergy_tag(slug)
         assert parse_synergy_tag(db, slug) is None
@@ -935,3 +935,199 @@ def test_catalog_name_cache_is_bounded_and_canonical():
     assert _matching_name(catalog, "TIME LORD") == "Time Lord"
     assert _matching_name(catalog, "unknown") is None
     assert _canonical_names.cache_info().misses == 1
+
+
+# M12: directional expansion adds breadth, not new deck sampling weights.
+def test_m12_important_matter_and_trigger_tags_find_support():
+    from mtg_random_commander.synergy import recognizes_synergy_tag
+
+    db = FakeDB()
+    db.tags.update({
+        "attacking-matters-self": {"attacker"},
+        "gives-haste": {"haste-enabler"},
+        "extra-combat-phase": {"extra-combat"},
+        "trigger-doubler": {"doubler"},
+        "titan-trigger": {"titan"},
+        "leaves-battlefield-trigger": {"death-value"},
+        "mana-value-matters": {"mana-value-payoff"},
+        "synergy-cascade": {"cascade-card"},
+        "x-cost-matters": {"x-payoff"},
+        "mana-increaser": {"extra-mana"},
+    })
+    for tag, expected in (
+        ("attacking-matters-self", {"attacker", "haste-enabler", "extra-combat"}),
+        ("trigger-doubler", {"doubler", "titan", "death-value"}),
+        ("mana-value-matters", {"mana-value-payoff", "cascade-card"}),
+        ("x-cost-matters", {"x-payoff", "extra-mana"}),
+    ):
+        assert recognizes_synergy_tag(tag)
+        assert expected <= parse_synergy_tag(db, tag).pool
+
+
+def test_m12_repeatable_enablers_link_to_actual_payoffs():
+    db = FakeDB()
+    db.tags.update({
+        "repeatable-lifegain": {"lifegain-source"},
+        "lifegain-matters": {"lifegain-payoff"},
+        "repeatable-creature-tokens": {"token-source"},
+        "creature-count-matters": {"swarm-payoff"},
+        "your-sacrifice-matters": {"sac-payoff"},
+        "repeatable-pp-counters": {"counters-source"},
+        "counters-matter": {"counters-payoff"},
+    })
+    assert {"lifegain-source", "lifegain-payoff"} <= parse_synergy_tag(
+        db, "repeatable-lifegain"
+    ).pool
+    assert {"token-source", "swarm-payoff", "sac-payoff"} <= parse_synergy_tag(
+        db, "repeatable-creature-tokens"
+    ).pool
+    assert {"counters-source", "counters-payoff"} <= parse_synergy_tag(
+        db, "repeatable-pp-counters"
+    ).pool
+
+
+def test_m12_keyword_support_only_recognizes_curated_keywords():
+    from mtg_random_commander.synergy import recognizes_synergy_tag
+
+    db = FakeDB()
+    db.tags.update({
+        "gains-flying": {"flier"},
+        "gives-flying": {"flying-granter"},
+        "synergy-flying": {"flying-payoff"},
+        "gives-escape": {"escape-granter"},
+        "mill-self": {"miller"},
+    })
+    assert {"flier", "flying-payoff"} <= parse_synergy_tag(
+        db, "gains-flying"
+    ).pool
+    assert {"flying-granter", "flying-payoff"} <= parse_synergy_tag(
+        db, "gives-flying"
+    ).pool
+    assert {"escape-granter", "miller"} <= parse_synergy_tag(
+        db, "gives-escape"
+    ).pool
+    for unsupported in ("gains-nothing", "gives-nothing", "gains-soulshift"):
+        assert not recognizes_synergy_tag(unsupported)
+        assert parse_synergy_tag(db, unsupported) is None
+
+
+def test_m12_flicker_targets_filter_to_relevant_type_and_trigger():
+    db = FakeDB()
+    db.tags.update({
+        "flicker-creature": {"commander"},
+        "titan-trigger": {"etb-creature", "etb-artifact"},
+        "flicker-artifact": {"commander2"},
+    })
+    db.type_members["Creature"].add("etb-creature")
+    db.type_members["Artifact"].add("etb-artifact")
+    assert {"commander", "etb-creature"} <= parse_synergy_tag(
+        db, "flicker-creature"
+    ).pool
+    assert "etb-artifact" not in parse_synergy_tag(db, "flicker-creature").pool
+    assert {"commander2", "etb-artifact"} <= parse_synergy_tag(
+        db, "flicker-artifact"
+    ).pool
+    assert "etb-creature" not in parse_synergy_tag(db, "flicker-artifact").pool
+
+
+def test_m12_animate_and_sneak_explicit_target_types():
+    db = FakeDB()
+    db.tags.update({
+        "animate-artifact": {"animator"},
+        "sneak-creature": {"sneaker"},
+    })
+    assert {"animator", "artifact-card"} <= parse_synergy_tag(
+        db, "animate-artifact"
+    ).pool
+    assert "desert-land" not in parse_synergy_tag(db, "animate-artifact").pool
+    assert {"sneaker", "random-creature"} <= parse_synergy_tag(
+        db, "sneak-creature"
+    ).pool
+
+
+def test_m12_missing_optional_tags_are_safe_and_mode_stays_independent():
+    class StrictDB(FakeDB):
+        def by_tag(self, slug, *, include_descendants=True):
+            if slug not in self.tags:
+                raise LookupError(slug)
+            return super().by_tag(slug, include_descendants=include_descendants)
+
+    db = StrictDB(["repeatable-creature-tokens", "lifegain-matters"])
+    db.tags.update({
+        "repeatable-creature-tokens": {"tokens"},
+        "lifegain-matters": {"lifegain"},
+    })
+    packages = get_synergy_packages(db, "cmd")
+    assert len(packages) == 2
+    assert {package.source_tag for package in packages} == {
+        "repeatable-creature-tokens", "lifegain-matters"
+    }
+    deck = Deck(commanders=("cmd",))
+    assert fill_synergy(
+        db, deck, "cmd", {"tokens", "lifegain"}, 2, Random(10),
+        packages=packages,
+    ) == 2
+
+
+def test_m12_no_blanket_descriptive_tag_fallback():
+    from mtg_random_commander.synergy import recognizes_synergy_tag
+    for slug in (
+        "activated-ability", "triggered-ability", "alliteration",
+        "repeatable-crime", "gives-random-new-mechanic", "animate-self",
+        "sneak-from-library", "flicker-self", "tutor-to-hand",
+    ):
+        assert not recognizes_synergy_tag(slug)
+
+
+def test_m12_descend_detected_from_commander_oracle_text_without_tag():
+    from types import SimpleNamespace
+
+    class DescendDB(FakeDB):
+        def __getitem__(self, cid):
+            return SimpleNamespace(faces=(SimpleNamespace(
+                oracle_text=(
+                    "At the beginning of your end step, if you descended "
+                    "this turn, create a 1/1 black Fungus creature token."
+                ),
+            ),))
+
+    db = DescendDB()
+    db.tags.update({
+        "mill-self": {"self-miller"},
+        "free-sacrifice-outlet": {"sacrifice-outlet"},
+    })
+    packages = get_synergy_packages(db, "cmd")
+    assert len(packages) == 1
+    assert packages[0].source_tag == "mechanic:descend"
+    assert packages[0].pool == {"self-miller", "sacrifice-outlet"}
+
+
+def test_m12_descend_not_inferred_from_unrelated_text():
+    from types import SimpleNamespace
+
+    class TextDB(FakeDB):
+        def __getitem__(self, cid):
+            return SimpleNamespace(faces=(SimpleNamespace(
+                oracle_text="Whenever a creature enters the battlefield, draw a card."
+            ),))
+
+    db = TextDB()
+    db.tags["mill-self"] = {"miller"}
+    assert get_synergy_packages(db, "cmd") == ()
+
+
+def test_m12_direct_descend_tag_does_not_duplicate_text_package():
+    from types import SimpleNamespace
+
+    class TaggedDescendDB(FakeDB):
+        def __getitem__(self, cid):
+            return SimpleNamespace(faces=(SimpleNamespace(
+                oracle_text="Whenever you descend, create a Fungus.",
+            ),))
+
+    db = TaggedDescendDB(["descend"])
+    db.tags.update({"descend": {"commander"}, "mill-self": {"miller"}})
+    packages = get_synergy_packages(db, "cmd")
+    assert len(packages) == 1
+    assert packages[0].source_tag == "descend"
+    assert {"commander", "miller"} <= packages[0].pool

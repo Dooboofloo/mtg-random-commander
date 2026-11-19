@@ -9,10 +9,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import re
 from random import Random
 from typing import TYPE_CHECKING
 
 from .models import Deck
+from .synergy_expansion import (
+    EXPANDED_ENABLER_TAGS,
+    TARGET_ABILITY_EXPRESSIONS,
+    TARGET_ABILITY_SUPPORT,
+    DESCEND_ENABLERS,
+)
 from .synergy_resources import (
     RESOURCE_ENABLER_TAGS,
     RESOURCE_TYPE_FILTERS,
@@ -260,6 +267,8 @@ def recognizes_synergy_tag(slug: str) -> bool:
 
     return (
         slug in PAYOFF_ENABLER_TAGS
+        or slug in EXPANDED_ENABLER_TAGS
+        or slug in TARGET_ABILITY_EXPRESSIONS
         or slug in RESOURCE_ENABLER_TAGS
         or slug in TARGET_TAG_ENABLERS
         or _target_expression(slug) is not None
@@ -493,6 +502,38 @@ def parse_synergy_tag(db: CardDatabase, slug: str) -> SynergyPackage | None:
                 db.by_type(required_type)
             )
 
+    elif slug in EXPANDED_ENABLER_TAGS:
+        mode = "expanded"
+        inferred = _tag_pool(db, EXPANDED_ENABLER_TAGS[slug])
+        # Extend the preexisting generic concept interpretation rather than
+        # silently replacing it for previously recognized synergy tags.
+        if slug.startswith("synergy-"):
+            concept = slug.removeprefix("synergy-")
+            inferred.update(_concept_pool(db, concept))
+            inferred.update(_tag_pool(db, CONCEPT_ENABLER_TAGS.get(concept, ())))
+
+    elif slug in TARGET_ABILITY_EXPRESSIONS:
+        mode = slug.partition("-")[0]
+        expression = TARGET_ABILITY_EXPRESSIONS[slug]
+        if expression in {"nonland", "permanent"}:
+            # Those are intentionally too broad for a general type query.
+            # Use only known ETB or attack payoffs, with land filtering.
+            inferred = _tag_pool(db, TARGET_ABILITY_SUPPORT[mode])
+            if expression == "nonland":
+                inferred.difference_update(db.by_type("Land"))
+        else:
+            targets = _target_pool(db, expression)
+            if targets is None:
+                return None
+            if mode == "flicker":
+                # Prefer relevant ETB/leave triggers over arbitrary creatures
+                # or artifacts; the direct tag remains available regardless.
+                inferred = targets & _tag_pool(db, TARGET_ABILITY_SUPPORT[mode])
+            else:
+                # A sneak/animate enabler can use ordinary cards of the
+                # specified type even if they lack Oracle Tag relationships.
+                inferred = targets
+
     elif (target := _target_expression(slug)) is not None:
         mode, expression = target
         inferred = _target_pool(db, expression)
@@ -533,10 +574,27 @@ def get_synergy_packages(
 ) -> tuple[SynergyPackage, ...]:
     """Parse the commander's direct Oracle Tags."""
     packages = []
-    for tagging in db.taggings_for(commander_id):
+    taggings = db.taggings_for(commander_id)
+    for tagging in taggings:
         parsed = parse_synergy_tag(db, tagging.tag_slug)
         if parsed is not None:
             packages.append(parsed)
+
+    # Scryfall's commander Tagger inventory does not currently expose a
+    # `descend` archetype tag. This explicit mechanic check covers real
+    # descend commanders without guessing at other rules text or card roles.
+    if not any(tag.tag_slug == "descend" for tag in taggings) and hasattr(db, "__getitem__"):
+        faces = getattr(db[commander_id], "faces", ())
+        if any(
+            re.search(r"\bdescend(?:s|ed|ing)?\b", getattr(face, "oracle_text", None) or "", re.I)
+            for face in faces
+        ):
+            pool = _tag_pool(db, DESCEND_ENABLERS)
+            if pool:
+                packages.append(SynergyPackage(
+                    "mechanic:descend", "mechanic", frozenset(pool)
+                ))
+
     return tuple(packages)
 
 

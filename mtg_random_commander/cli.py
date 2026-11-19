@@ -309,6 +309,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    # Explicit database maintenance is a command, not a deck modifier.
+    # It must not resolve commanders, validate packages, or write decklists.
+    if args.update_db:
+        try:
+            path = ensure_database(path=args.database, update=True)
+        except Exception as exc:
+            print(f"Unable to update database: {exc}", file=sys.stderr)
+            return 1
+        print(f"Card database refreshed: {path}")
+        return 0
+
     if args.count < 1:
         parser.error("--count must be positive")
 
@@ -328,7 +339,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         path = ensure_database(
             path=args.database,
-            update=args.update_db,
+            update=False,
         )
 
         with CardDatabase.open(path) as db:
