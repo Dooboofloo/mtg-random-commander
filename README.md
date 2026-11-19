@@ -27,6 +27,12 @@ Double-click `Run.bat` to generate a deck (the console remains open), or run
 .\MTGRandomCommander.exe --update-db
 ```
 
+The v1.0.2 Windows release bundles MTG CardDB 1.2.1, fixing database
+initialization and refresh failures caused by unusual Scryfall type lines.
+It also includes a Windows temporary-file cleanup fix. CardDB is embedded
+in the EXE distribution; installing a newer CardDB into a separate Python
+environment does **not** upgrade an older executable.
+
 Keep the `_internal` folder beside the executable. It contains the bundled
 Python runtime and dependencies. The first run requires internet access to
 initialize a CardDB snapshot in the persistent user-data location; the
@@ -70,7 +76,7 @@ python main.py
 
 Creating and activating a virtual environment before installation is recommended.
 
-The application uses `mtg-carddb>=1.2,<2.0` for card data, Oracle Tags, legality information, and database management.
+The application uses `mtg-carddb>=1.2.1,<2.0` for card data, Oracle Tags, legality information, and database management.
 
 ## Usage
 

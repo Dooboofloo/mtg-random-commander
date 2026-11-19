@@ -39,6 +39,7 @@ try {
 
     $archive = Join-Path $root "dist\MTGRandomCommander-windows-x64-$Version.zip"
     $pendingArchive = Join-Path $root "dist\MTGRandomCommander-windows-x64-$Version.pending.zip"
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     if (Test-Path -LiteralPath $archive) {
         Remove-Item -LiteralPath $archive -Force -ErrorAction Stop

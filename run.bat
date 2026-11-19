@@ -24,8 +24,8 @@ if errorlevel 1 (
     exit /b 1
 )
 
-rem Require mtg-carddb 1.2+ while preserving offline subsequent launches.
-".venv\Scripts\python.exe" -c "from importlib.metadata import version; v=tuple(map(int, version('mtg-carddb').split('.')[:2])); assert (1, 2) <= v < (2, 0)" >nul 2>nul
+rem Require mtg-carddb 1.2.1+ while preserving offline subsequent launches.
+".venv\Scripts\python.exe" -c "from importlib.metadata import version; v=tuple(map(int, version('mtg-carddb').split('.')[:3])); assert (1, 2, 1) <= v < (2, 0, 0)" >nul 2>nul
 if errorlevel 1 (
     echo Installing Python dependencies...
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt
