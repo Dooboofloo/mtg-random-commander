@@ -212,3 +212,45 @@ def test_m8_uncovered_family_opportunities():
         == 1
     )
     assert families["tutor-*"]["actionable_nonland_commanders"] == 0
+
+def test_m13_audit_includes_uncovered_commanders_and_category():
+    from scripts.audit_synergy import tag_category
+
+    db = FakeDB()
+    db.commander_tags["black-cmd"] += (
+        "activated-ability", "alliteration", "noncreature-typal", "mana-sink",
+    )
+    db.tags.update({
+        "activated-ability": {"black-cmd"},
+        "alliteration": {"black-cmd"},
+        "noncreature-typal": {"black-cmd"},
+        "mana-sink": {"black-cmd"},
+    })
+    report = build_report(db, FakePolicy())
+    assert report["summary"]["commanders_without_actionable_nonland_synergy"] == 1
+    (uncovered,) = report["uncovered_commanders"]
+    assert uncovered["name"] == "Black Leader"
+    assert uncovered["reason"] == "recognized-without-nonland-candidates"
+    categories = {x["tag"]: x["category"] for x in uncovered["tags"]}
+    assert all(categories[tag] == category for tag, category in {
+        "alliteration": "metadata",
+        "activated-ability": "rules-description",
+        "noncreature-typal": "requires-context",
+        "mana-sink": "mechanical",
+    }.items())
+    assert tag_category("cycle-xyz-face") == "metadata"
+    assert tag_category("tutors-by-name") == "requires-context"
+    assert tag_category("low-mana-value-matters") == "mechanical"
+    assert report["summary"]["unsupported_tag_categories"]["metadata"] >= 1
+    assert any(row["tag"] == "mana-sink" and row["status"] == "direct-only"
+               for row in report["tags"])
+
+
+def test_m13_uncovered_list_deterministic_and_csv_category(tmp_path):
+    report = build_report(FakeDB(), FakePolicy())
+    assert len(report["uncovered_commanders"]) == 1
+    json_file, csv_file = tmp_path / "m13.json", tmp_path / "m13.csv"
+    write_reports(report, json_file, csv_file)
+    assert json.loads(json_file.read_text())["uncovered_commanders"] == report["uncovered_commanders"]
+    with csv_file.open(encoding="utf-8-sig", newline="") as f:
+        assert "category" in next(csv.DictReader(f))

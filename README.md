@@ -222,11 +222,18 @@ Supported relationships include:
 - Power/toughness, X-cost, mana value, off-turn casting, and other additional `*-matters` tags
 - Selected `repeatable-*`, `gives-*`, and `gains-*` tags linked **directionally** to useful payoffs
 - Explicit Animate and Sneak targets; Descend recognized from commander rules text when Tagger has no corresponding tag
+- M13: combat payoffs, mana sinks, life-loss and repeatable engines, additional copy/reanimation/flicker/tutor interactions
+- Low/high mana value themes select actual nonland cards by indexed mana-value ranges, not merely cards sharing a tag
+- Crime payoffs are recognized from specific commander rules-text phrases when no dedicated Tagger payoff tag exists
 
-The M12 relationships are defined in `synergy_expansion.py`. They are intentionally
-curated: descriptive tags such as `activated-ability` are not automatically
-converted into synergies. Supporting tags absent from a CardDB snapshot are
-skipped, and a recognized tag with no suitable cards can still produce no package.
+M12 relationships are defined in `synergy_expansion.py`, and M13 mappings in
+`synergy_m13.py`. Both are intentionally curated: a descriptive tag such as
+`activated-ability`, `alliteration`, or `noncreature-typal` without the relevant
+specific type context is **not** automatically treated as a strategy. In
+particular, `repeatable-crime` identifies a crime *enabler*; M13 adds a synthetic
+package only for commanders whose rules text describes a crime payoff. Optional
+tags missing from a CardDB snapshot are skipped, and a recognized tag without
+suitable cards can still produce no package.
 
 Each recognized commander synergy package receives independent selection weight. A very large candidate pool therefore does not automatically overwhelm a smaller commander theme.
 
@@ -418,7 +425,20 @@ It reads an existing CardDB snapshot without modifying it.
 
 ### Synergy coverage audit
 
-`scripts/audit_synergy.py` examines direct Oracle Tags on eligible commanders and measures how many have recognized, usable synergy pools. Run this against the **same CardDB snapshot** before and after an M12 change to compare coverage; `unsupported`, `direct-only`, and `expanded` are different outcomes. Synthetic Descend packages are recognized at deck-generation time and are not counted in this tag-only audit.
+`scripts/audit_synergy.py` examines direct Oracle Tags on eligible commanders
+and measures how many have recognized, usable synergy pools. Run it against the
+**same CardDB snapshot** before and after a parser change to compare coverage;
+`unsupported`, `direct-only`, `expanded`, and `expanded-unusable` are different
+outcomes. Synthetic Descend and crime packages are recognized at deck-generation
+time and **not counted** in this direct-tag-only audit.
+
+M13 adds an independent `category` field (`mechanical`, `metadata`,
+`rules-description`, `requires-context`) to every tag row, plus
+`unsupported_tag_categories` in the summary and an `uncovered_commanders`
+array in the JSON report. Each uncovered commander includes its Oracle ID,
+name, color identity, and direct tags with their categories and parser statuses.
+Categories are heuristic review labels, not hidden fallback parsing rules;
+`uncovered_commanders` is based on color-legal **nonland** candidate pools.
 
 Run it with:
 
@@ -462,7 +482,8 @@ The comparison identifies newly appearing and no-longer-present commander tag sl
 - `mtg_random_commander/packages.py` — functional package selection
 - `mtg_random_commander/synergy.py` — commander synergy parsing and selection
 - `mtg_random_commander/synergy_resources.py` — curated resource relationships
-- `mtg_random_commander/synergy_expansion.py` — additional directional and keyword relationships
+- `mtg_random_commander/synergy_expansion.py` — M12 directional and keyword relationships
+- `mtg_random_commander/synergy_m13.py` — additional M13 mechanical, mana-value, and crime relationships
 - `mtg_random_commander/lands.py` — mana-base construction
 - `mtg_random_commander/export.py` — decklist export
 - `scripts/` — auditing utilities

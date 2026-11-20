@@ -20,6 +20,12 @@ from .synergy_expansion import (
     TARGET_ABILITY_SUPPORT,
     DESCEND_ENABLERS,
 )
+from .synergy_m13 import (
+    M13_ENABLER_TAGS,
+    M13_MANA_VALUE_RANGES,
+    M13_CRIME_PAYOFF_PATTERN,
+    M13_CRIME_ENABLERS,
+)
 from .synergy_resources import (
     RESOURCE_ENABLER_TAGS,
     RESOURCE_TYPE_FILTERS,
@@ -268,7 +274,9 @@ def recognizes_synergy_tag(slug: str) -> bool:
     return (
         slug in PAYOFF_ENABLER_TAGS
         or slug in EXPANDED_ENABLER_TAGS
+        or slug in M13_ENABLER_TAGS
         or slug in TARGET_ABILITY_EXPRESSIONS
+        or slug in M13_MANA_VALUE_RANGES
         or slug in RESOURCE_ENABLER_TAGS
         or slug in TARGET_TAG_ENABLERS
         or _target_expression(slug) is not None
@@ -512,6 +520,19 @@ def parse_synergy_tag(db: CardDatabase, slug: str) -> SynergyPackage | None:
             inferred.update(_concept_pool(db, concept))
             inferred.update(_tag_pool(db, CONCEPT_ENABLER_TAGS.get(concept, ())))
 
+    elif slug in M13_MANA_VALUE_RANGES:
+        # CardDB's indexed interval query selects genuine low/high-MV spells
+        # rather than merely collecting other mana-value payoffs.  This runs
+        # only for the explicit three slugs, not arbitrary *-matters labels.
+        mode = "mana-value"
+        low, high = M13_MANA_VALUE_RANGES[slug]
+        inferred = set(db.mana_value_between(low, high)) - set(db.by_type("Land"))
+        inferred.update(_tag_pool(db, M13_ENABLER_TAGS.get(slug, ())))
+
+    elif slug in M13_ENABLER_TAGS:
+        mode = "expanded"
+        inferred = _tag_pool(db, M13_ENABLER_TAGS[slug])
+
     elif slug in TARGET_ABILITY_EXPRESSIONS:
         mode = slug.partition("-")[0]
         expression = TARGET_ABILITY_EXPRESSIONS[slug]
@@ -593,6 +614,21 @@ def get_synergy_packages(
             if pool:
                 packages.append(SynergyPackage(
                     "mechanic:descend", "mechanic", frozenset(pool)
+                ))
+
+    # "Commit a crime" payoff wording is absent from the current Tagger
+    # commander tag inventory.  Only a real payoff clause creates the
+    # synthetic package, not a generic repeatable-crime enabler.
+    if hasattr(db, "__getitem__"):
+        faces = getattr(db[commander_id], "faces", ())
+        if any(
+            re.search(M13_CRIME_PAYOFF_PATTERN, getattr(face, "oracle_text", None) or "", re.I)
+            for face in faces
+        ):
+            pool = _tag_pool(db, M13_CRIME_ENABLERS)
+            if pool:
+                packages.append(SynergyPackage(
+                    "mechanic:crime", "mechanic", frozenset(pool)
                 ))
 
     return tuple(packages)

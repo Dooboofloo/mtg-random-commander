@@ -33,7 +33,7 @@ DEFERRED_FAMILIES = frozenset({
 })
 
 COLUMNS = (
-    "tag", "family", "status", "commanders", "actionable_commanders",
+    "tag", "family", "category", "status", "commanders", "actionable_commanders",
     "pool_size", "direct_size", "inferred_size", "descendant_extra",
     "eligible_pool_size", "eligible_inferred_size",
     "eligible_nonland_pool_size", "eligible_nonland_inferred_size",
@@ -41,6 +41,39 @@ COLUMNS = (
     "example_commanders",
 )
 
+
+# Classification is for triage, never fed back into the parser.  Tags that
+# describe editorial metadata or rule structures are not missing strategies.
+METADATA_TAGS = frozenset({
+    "alliteration", "punny-name", "rhyming-name", "anagram",
+    "unique-type-line", "unique-mana-cost", "namesake-spell", "eponymous",
+    "eponymous-planeswalker", "guest-designer", "fun-ruling",
+    "dnd-character", "dnd-monster", "multi-character-card", "group-slug",
+    "face-commander", "alt-commander", "commander-set-booster-cards",
+    "unnoted-tracked-information", "untracked-indefinite-effect",
+})
+RULE_DESCRIPTION_TAGS = frozenset({
+    "activated-ability", "triggered-ability", "intervening-if-clause",
+    "delayed-trigger", "reflexive-trigger", "delayed-replacement-effect",
+    "self-replacement-effect", "virtual-french-vanilla", "virtual-vanilla",
+    "french-vanilla", "casting-restriction", "drawback", "symmetrical",
+})
+CONTEXT_REQUIRED_TAGS = frozenset({
+    "noncreature-typal", "tutors-by-name", "tutored-by-name",
+    "name-matters", "pair-commander", "tutor-copy",
+    "tutor-card", "tutor-mv", "sneak-from-library",
+})
+
+
+def tag_category(slug: str) -> str:
+    """A review aid, not proof that a tag is or is not a real synergy."""
+    if slug.startswith(("cycle-", "deprecated-", "cda-")) or slug in METADATA_TAGS:
+        return "metadata"
+    if slug in RULE_DESCRIPTION_TAGS:
+        return "rules-description"
+    if slug in CONTEXT_REQUIRED_TAGS:
+        return "requires-context"
+    return "mechanical"
 
 def family_for(slug: str) -> str:
     """Group tag patterns for prioritization, not for actual parsing."""
@@ -221,6 +254,7 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
         rows.append({
             "tag": slug,
             "family": family,
+            "category": tag_category(slug),
             "status": status,
             "commanders": len(owners),
             "actionable_commanders": len(actionable),
@@ -253,6 +287,36 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
     # Upper-bound opportunities, not promises of new synergies:
     # unsupported tags on uncovered commanders deserve investigation.
     uncovered = set(commanders) - actionable_nonland_any
+
+    # Make the remaining uncovered commanders directly inspectable instead
+    # of inferring them from overlapping family totals or example names.
+    status_by_tag = {row["tag"]: row["status"] for row in rows}
+    tags_by_commander: dict[str, set[str]] = defaultdict(set)
+    for slug, owners in tagged_by_slug.items():
+        for cid in owners:
+            tags_by_commander[cid].add(slug)
+    uncovered_commanders = [
+        {
+            "oracle_id": cid,
+            "name": cards[cid].name,
+            "color_identity": "".join(sorted(cards[cid].color_identity)),
+            "reason": (
+                "recognized-without-nonland-candidates"
+                if any(status_by_tag[tag] not in ("unsupported", "skipped")
+                       for tag in tags_by_commander[cid])
+                else "no-recognized-tag"
+            ),
+            "tags": [
+                {
+                    "tag": slug,
+                    "status": status_by_tag[slug],
+                    "category": tag_category(slug),
+                }
+                for slug in sorted(tags_by_commander[cid])
+            ],
+        }
+        for cid in sorted(uncovered, key=lambda ident: (cards[ident].name.casefold(), ident))
+    ]
 
     families = [
         {
@@ -308,12 +372,16 @@ def build_report(db: Any, policy: CardPolicy) -> dict[str, Any]:
             "tag_statuses": dict(sorted(Counter(
                 row["status"] for row in rows
             ).items())),
+            "unsupported_tag_categories": dict(sorted(Counter(
+                row["category"] for row in rows if row["status"] == "unsupported"
+            ).items())),
             "commander_status_counts": {
                 status: len(owners)
                 for status, owners in sorted(status_commanders.items())
             },
         },
         "families": families,
+        "uncovered_commanders": uncovered_commanders,
         "tags": sorted(
             rows,
             key=lambda row: (-row["commanders"], row["tag"]),
@@ -381,6 +449,15 @@ def print_summary(report: dict[str, Any], top: int) -> None:
     print("Tag statuses: " + ", ".join(
         f"{status}={count}" for status, count in summary["tag_statuses"].items()
     ))
+    print("Unsupported tag categories: " + ", ".join(
+        f"{category}={count}"
+        for category, count in summary["unsupported_tag_categories"].items()
+    ))
+    print("\nUncovered commander examples:")
+    for commander in report["uncovered_commanders"][:top]:
+        mechanical = [tag["tag"] for tag in commander["tags"]
+                      if tag["category"] == "mechanical" and tag["status"] == "unsupported"]
+        print(f"  {commander['name']}: {', '.join(mechanical[:3]) or commander['reason']}")
     print("\nLargest families (unique affected commanders):")
     for row in report["families"][:top]:
         print(f"  {row['family']:<26} {row['commanders']:>5} commanders; {row['tags']:>4} tags")

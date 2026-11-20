@@ -653,15 +653,8 @@ def test_m8c_ambiguous_target_tags_remain_unsupported():
     db = FakeDB()
 
     unsupported = (
-        "copy-self",
-        "copy-nonland",
-        "tutor-card",
-        "tutor-to-hand",
-        "reanimate-from-opponent",
-        "reanimate-face-down",
-        "impulse-to-top",
-        "impulse-pw-tyvar",
-        "tutor-from-opponent",
+        "tutor-card",  # generic target has no directional enabler
+        "impulse-pw-tyvar",  # unrelated special exception
     )
 
     for slug in unsupported:
@@ -871,7 +864,6 @@ def test_m8d_ambiguous_resource_tags_remain_unsupported():
     for slug in (
         "tap-fuel-unknown",
         "graveyard-fuel-self",
-        "gains-soulshift",
         "sneak-self",
     ):
         assert not recognizes_synergy_tag(slug)
@@ -1006,7 +998,7 @@ def test_m12_keyword_support_only_recognizes_curated_keywords():
     assert {"escape-granter", "miller"} <= parse_synergy_tag(
         db, "gives-escape"
     ).pool
-    for unsupported in ("gains-nothing", "gives-nothing", "gains-soulshift"):
+    for unsupported in ("gains-nothing", "gives-nothing"):
         assert not recognizes_synergy_tag(unsupported)
         assert parse_synergy_tag(db, unsupported) is None
 
@@ -1074,7 +1066,7 @@ def test_m12_no_blanket_descriptive_tag_fallback():
     for slug in (
         "activated-ability", "triggered-ability", "alliteration",
         "repeatable-crime", "gives-random-new-mechanic", "animate-self",
-        "sneak-from-library", "flicker-self", "tutor-to-hand",
+        "sneak-from-library", "tutor-card", "noncreature-typal",
     ):
         assert not recognizes_synergy_tag(slug)
 
@@ -1131,3 +1123,139 @@ def test_m12_direct_descend_tag_does_not_duplicate_text_package():
     assert len(packages) == 1
     assert packages[0].source_tag == "descend"
     assert {"commander", "miller"} <= packages[0].pool
+
+
+def test_m13_combat_and_mana_sink_relationships_are_directional():
+    from mtg_random_commander.synergy import recognizes_synergy_tag
+
+    db = FakeDB()
+    db.tags.update({
+        "scales-with-power": {"large-commander"},
+        "single-target-buff": {"pump"},
+        "gives-saboteur": {"saboteur-granter"},
+        "gives-unblockable": {"evasion-granter"},
+        "mana-sink": {"mana-hungry"},
+        "mana-increaser": {"doubler"},
+        "repeatable-scry": {"scryer"},
+        "top-deck-manipulation": {"top-stacker"},
+        "synergy-scry": {"scry-payoff"},
+    })
+    for slug, must_include in (
+        ("scales-with-power", {"large-commander", "pump"}),
+        ("gives-saboteur", {"saboteur-granter", "evasion-granter"}),
+        ("mana-sink", {"mana-hungry", "doubler"}),
+        ("repeatable-scry", {"scryer", "top-stacker", "scry-payoff"}),
+    ):
+        assert recognizes_synergy_tag(slug)
+        assert must_include <= parse_synergy_tag(db, slug).pool
+
+
+def test_m13_mana_value_uses_index_and_excludes_lands():
+    class ManaDB(FakeDB):
+        def __init__(self):
+            super().__init__()
+            self.ranges = []
+            self.type_members["Land"].update({"low-land", "high-land"})
+
+        def mana_value_between(self, minimum, maximum):
+            self.ranges.append((minimum, maximum))
+            if (minimum, maximum) == (0, 2):
+                return frozenset({"low-land", "cheap-spell"})
+            if (minimum, maximum) == (5, 1000):
+                return frozenset({"high-land", "expensive-spell"})
+            raise AssertionError((minimum, maximum))
+
+    db = ManaDB()
+    db.tags.update({
+        "low-mana-value-matters": {"cheap-commander"},
+        "high-mana-value-matters": {"big-commander"},
+        "scales-with-mana-value": {"scales-commander"},
+    })
+    for slug, wanted, unwanted in (
+        ("low-mana-value-matters", "cheap-spell", "low-land"),
+        ("high-mana-value-matters", "expensive-spell", "high-land"),
+        ("scales-with-mana-value", "expensive-spell", "high-land"),
+    ):
+        package = parse_synergy_tag(db, slug)
+        assert package.mode == "mana-value"
+        assert wanted in package.pool
+        assert unwanted not in package.pool
+    assert db.ranges == [(0, 2), (5, 1000), (5, 1000)]
+
+
+def test_m13_target_and_specialized_relationships():
+    db = FakeDB()
+    db.tags.update({
+        "tutor-to-graveyard": {"entomber"},
+        "reanimate": {"reanimator"},
+        "copy-from-graveyard": {"graveyard-copier"},
+        "mill-self": {"miller"},
+        "flicker-slow": {"slow-blink"},
+        "titan-trigger": {"etb-target"},
+        "gains-soulshift": {"spirit-returner"},
+        "synergy-spirit": {"spirit-payoff"},
+    })
+    assert {"entomber", "reanimator"} <= parse_synergy_tag(
+        db, "tutor-to-graveyard"
+    ).pool
+    assert {"graveyard-copier", "miller"} <= parse_synergy_tag(
+        db, "copy-from-graveyard"
+    ).pool
+    assert {"slow-blink", "etb-target"} <= parse_synergy_tag(
+        db, "flicker-slow"
+    ).pool
+    assert {"spirit-returner", "spirit-payoff"} <= parse_synergy_tag(
+        db, "gains-soulshift"
+    ).pool
+
+
+def test_m13_crime_payoff_gets_a_synthetic_support_package():
+    class CrimeDB(FakeDB):
+        def __getitem__(self, cid):
+            return SimpleNamespace(faces=(SimpleNamespace(
+                oracle_text="Whenever you commit a crime, create a Treasure token.",
+            ),))
+
+    db = CrimeDB()
+    db.tags.update({
+        "repeatable-crime": {"repeat-offender"},
+        "spot-removal": {"targeted-removal"},
+        "pinger": {"ping-opponent"},
+    })
+    (package,) = get_synergy_packages(db, "cmd")
+    assert package.source_tag == "mechanic:crime"
+    assert package.pool == {"repeat-offender", "targeted-removal", "ping-opponent"}
+
+
+def test_m13_crime_enabler_alone_is_not_a_payoff():
+    class CrimeDB(FakeDB):
+        def __getitem__(self, cid):
+            return SimpleNamespace(faces=(SimpleNamespace(
+                oracle_text="{T}: This creature deals 1 damage to target opponent.",
+            ),))
+
+    db = CrimeDB(("repeatable-crime",))
+    db.tags["repeatable-crime"] = {"commander"}
+    assert get_synergy_packages(db, "cmd") == ()
+
+
+def test_m13_missing_optional_tags_and_metadata_safety():
+    from mtg_random_commander.synergy import recognizes_synergy_tag
+
+    class StrictDB(FakeDB):
+        def by_tag(self, slug, *, include_descendants=True):
+            if slug not in self.tags:
+                raise LookupError(slug)
+            return super().by_tag(slug, include_descendants=include_descendants)
+
+    db = StrictDB()
+    db.tags["mana-sink"] = {"commander"}
+    package = parse_synergy_tag(db, "mana-sink")
+    assert package.pool == {"commander"}
+    for slug in (
+        "triggered-ability", "activated-ability", "alliteration",
+        "cycle-test-commander", "repeatable-crime", "noncreature-typal",
+        "tutors-by-name", "name-matters", "table-order-matters",
+    ):
+        assert not recognizes_synergy_tag(slug)
+        assert parse_synergy_tag(db, slug) is None
